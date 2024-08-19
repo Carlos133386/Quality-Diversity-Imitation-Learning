@@ -1,0 +1,13 @@
+trajs*
+reward*
+experiment*
+checkpoints
+wandb
+*.whl
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+.idea
+log.txt
+
+
