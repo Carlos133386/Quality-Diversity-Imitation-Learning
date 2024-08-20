@@ -133,7 +133,6 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
     if archive.empty:
         raise IndexError("No elements in archive.")
 
-    # FIXME: walker2d and humanoid get unreasonable bad elites
     ord_indices = np.arange(archive._num_occupied)
     occupied_indices = archive._occupied_indices[ord_indices]
     archive._solution_arr = archive._solution_arr[occupied_indices]
@@ -143,7 +142,6 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
 
     sorted_indices=np.argsort(archive._objective_arr)[::-1]
     topk_indices = sorted_indices[:topk]
-    # pdb.set_trace()
     
     # Farthest Point Sampling
     #https://medium.com/@konyakinsergey/farthest-point-sampling-for-k-means-clustering-23a6dfc2dfb1
@@ -173,7 +171,6 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
 
     centroids = np.array(centroids)
     selected_indices = topk_indices[centroid_indices]
-    # pdb.set_trace()
     
     elites = []
     for i in range(num_demo):
@@ -189,8 +186,6 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
     return elites, selected_indices, archive._measures_arr, archive._measures_arr[topk_indices]
 
 def get_good_and_diverse_elite(elite, actor_cfg):
-    # elite = scheduler.archive.sample_elites(1)
-    
     print(f'Loading agent with reward {elite.objective_batch[0]} and measures {elite.measures_batch[0]}')
     agent = Actor(obs_shape=actor_cfg.obs_shape[0], action_shape=actor_cfg.action_shape, normalize_obs=normalize_obs, normalize_returns=normalize_rewards).deserialize(elite.solution_batch.flatten()).to(device)
     if actor_cfg.normalize_obs:
@@ -362,7 +357,7 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
  
     
     file_name = f'{traj_root}/{num_demo}episodes/trajs_ppga_{env_name}.pt'
-    pickle.dump(traj, open(file_name, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+    # pickle.dump(traj, open(file_name, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
 
 # topk=150
 # topk=200
@@ -371,11 +366,11 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
 # topk=350
 # topk=400
 # topk=450
-# topk=500
+topk=500
 # topk=600
 # topk=700
 # topk=800
-topk=900
+# topk=900
 # topk=1000
 for num_demo in [4, 8, 16, 32, 64]:
     for env_name in ['ant', 'walker2d', 'humanoid']: # 
