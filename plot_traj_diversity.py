@@ -64,7 +64,7 @@ if __name__ == '__main__':
     # topk=800
     # topk=900
     # topk=1000
-    for topk in [900, 1000]:#100, 300, 500, 700200, 300, 400, 500, 600, 700, 800, 900, 1000, 150, 250, 350, 450]:
-        for env_name in ['ant']: # , 'humanoid','walker2d'
-            for num_demo in [8]: #, 4, 8, 16, 32, 64
+    for topk in ['HalfMax']:
+        for env_name in ['humanoid','walker2d']: # , 'ant'
+            for num_demo in [4]: #, 4, 8, 16, 32, 64
                 visualize(num_demo, env_name, topk)
