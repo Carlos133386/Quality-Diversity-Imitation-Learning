@@ -357,7 +357,7 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
  
     
     file_name = f'{traj_root}/{num_demo}episodes/trajs_ppga_{env_name}.pt'
-    # pickle.dump(traj, open(file_name, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
+    pickle.dump(traj, open(file_name, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
 
 # topk=150
 # topk=200
