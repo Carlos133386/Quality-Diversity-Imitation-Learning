@@ -1591,6 +1591,132 @@ class VCSE(object):
         reward = torch.digamma(n_v+1) / ds + torch.log(eps * 2 + 0.00001)
         return reward, n_v,n_s, eps, state_norm, value_norm  
 
+class Encoder(nn.Module):
+
+    def __init__(self, latent_dim, action_dim,
+                 hidden_dim=100):
+
+        super(Encoder, self).__init__()
+        self.input_dim = latent_dim
+        self.output_dim = action_dim
+        self.hidden = hidden_dim
+
+        # Inverse Model architecture
+        self.linear_1 = nn.Linear(in_features=self.input_dim*2, out_features=self.hidden)
+        self.linear_2 = nn.Linear(in_features=self.hidden, out_features=self.hidden)
+        
+        self.tanh_1 = nn.Tanh()
+        self.tanh_2 = nn.Tanh()
+
+        self.mu = nn.Linear(hidden_dim, action_dim)
+        self.logvar = nn.Linear(hidden_dim, action_dim)
+
+        # Initialize the weights using xavier initialization
+        nn.init.xavier_uniform_(self.linear_1.weight)
+        nn.init.xavier_uniform_(self.linear_2.weight)
+        nn.init.xavier_uniform_(self.mu.weight)
+        nn.init.xavier_uniform_(self.logvar.weight)
+
+    def reparameterize(self, mu, logvar, device, training=True):
+        # Reparameterization trick as shown in the auto encoding variational bayes paper
+        if training:
+            std = logvar.mul(0.5).exp_()
+            eps = Variable(std.data.new(std.size()).normal_()).to(device)
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def forward(self, state, next_state):
+
+        # Concatenate the state and the next state
+        input = torch.cat([state, next_state], dim=-1)
+        x = self.linear_1(input)
+        x = self.tanh_1(x)
+        x = self.linear_2(x)
+        x = self.tanh_2(x)
+
+        mu = self.mu(x)
+        logvar = self.logvar(x)
+        
+        z = self.reparameterize(mu, logvar, state.device)
+        return z, mu, logvar
+
+
+class GIRIL(object):
+    def __init__(self,
+                 env,
+                 state_dim,
+                 action_dim,
+                 hidden_dim=100,
+                 device='cuda:0',
+                 lr=3e-4,
+                 ):
+
+        self.env = env
+        self.device = device
+        self.encoder = Encoder(latent_dim=state_dim, action_dim=action_dim,
+                                     hidden_dim=hidden_dim).to(device)
+        self.forward_dynamics_model = ForwardDynamicsModel(state_dim=state_dim, action_dim=action_dim,
+                                                      hidden_dim=hidden_dim).to(device)
+        self.lr = lr
+        
+        self.obs_shape = self.env.observation_space.shape
+        if len(self.obs_shape)==3:
+            self.action_dim = self.env.action_space.n
+        if len(self.obs_shape)==1:
+            self.action_dim = self.env.action_space.shape[0]
+
+        self.optim = optim.Adam(
+                                [
+                                    {'params': self.encoder.parameters()},
+                                    {'params': self.forward_dynamics_model.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+    
+    def get_vae_loss(self, recon_x, x, mean, log_var):
+        RECON = F.mse_loss(recon_x, x)
+        KLD = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
+    
+        return RECON, KLD 
+
+    def fit_batch(self, state, action, next_state, 
+                  lambda_action=1.0, kld_loss_beta=1.0, train=True):
+        
+        z, mu, logvar = self.encoder(state, next_state)
+         
+        reconstructed_next_state = self.forward_dynamics_model(z, state)
+        
+        criterionAction = nn.MSELoss()
+        action_loss = criterionAction(z, action)
+
+        recon_loss, kld_loss = self.get_vae_loss(reconstructed_next_state, 
+                                                 next_state, mu, logvar)
+        vae_loss = recon_loss + kld_loss_beta * kld_loss + lambda_action * action_loss 
+
+        if train:
+            self.optim.zero_grad()
+            vae_loss.backward(retain_graph=True)
+            self.optim.step()
+
+        # return inverse_loss, forward_loss, pred_action
+        return vae_loss, recon_loss, kld_loss_beta*kld_loss, \
+            lambda_action*action_loss, z
+
+    # Calculation of the curiosity reward
+    def calculate_intrinsic_reward(self, state, action, next_state):
+        with torch.no_grad():
+            if len(action.shape)>1:
+                action = action.squeeze(1)
+
+            pred_next_state = self.forward_dynamics_model(state, action)
+            processed_next_state = process(next_state, normalize=True, range=(-1, 1))
+            processed_pred_next_state = process(pred_next_state, normalize=True, range=(-1, 1))
+            reward = F.mse_loss(processed_pred_next_state, processed_next_state, reduction='none')
+            reward = torch.mean(reward, (0, 1, 3))
+            z, mu, logvar = self.encoder.forward(state,next_state)
+        return reward, mu, logvar
+
 def parse_args():
     parser = argparse.ArgumentParser()
     # PPO params

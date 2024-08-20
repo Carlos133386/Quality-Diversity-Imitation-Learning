@@ -20,7 +20,7 @@ from models.actor_critic import Actor, Critic, QDCritic
 from tqdm import tqdm 
 
 from algorithm.learn_url_reward import ICM, mCondICM, mRegICM, mCondRegICM, InverseModel, ForwardDynamicsModel, \
-    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL
+    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL 
 from algorithm.learn_url_reward import load_sa_data 
 import pdb
 
@@ -174,42 +174,7 @@ class PPO:
             self.dataset, self.dataloader = load_sa_data(cfg, 
                                                          return_next_state=False)
             self.update_reward_model = True
-
-        # if cfg.intrinsic_module == 'vcse':
-        #     self.reward_model = VCSE(knn_k)
-
-        # if cfg.intrinsic_module == 'rnd':
-        #     self.reward_model = RND(obs_dim,
-        #                                 rnd_rep_dim=32,
-        #                                 lr=3e-4
-        #                                 )
-        #     print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
-        #     # pdb.set_trace()
-        #     self.reward_model.predictor, self.reward_model.target = torch.load(reward_model_file_name)
-        
-        # if cfg.intrinsic_module == 'disagreement':
-        #     self.reward_model = Disagreement(
-        #                                 obs_dim,
-        #                                 action_dim,
-        #                                 lr=3e-4
-        #                                 )
-        #     print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
-        #     self.reward_model.disagreement = torch.load(reward_model_file_name)
-
-        # if cfg.intrinsic_module == 'aps':
-        #     self.reward_model = APS(
-        #                                 obs_dim=obs_dim,
-        #                                 knn_rms=False, 
-        #                                 knn_k=knn_k, 
-        #                                 knn_avg=True, 
-        #                                 knn_clip=0.0,
-        #                                 sf_dim=10,
-        #                                 lr=3e-4
-        #                                 )
-        #     print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
-        #     # pdb.set_trace()
-        #     self.reward_model.state_feat_net = torch.load(reward_model_file_name)
-    
+   
         if cfg.intrinsic_module == 'icm':
             self.reward_model = ICM(
                                         obs_dim,
@@ -255,44 +220,15 @@ class PPO:
             self.reward_model.inverse_model, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
 
 
-        # if cfg.intrinsic_module == 'giril':
-        #     self.reward_model = GIRIL(
-        #                                 obs_dim,
-        #                                 action_dim,
-        #                                 lr=3e-4,
-        #                                 )
-        #     print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
-        #     self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
+        if cfg.intrinsic_module == 'giril':
+            self.reward_model = GIRIL(
+                                        obs_dim,
+                                        action_dim,
+                                        lr=3e-4,
+                                        )
+            print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
+            self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
 
-        # if cfg.intrinsic_module == 'icm_apt':
-        #     self.reward_model = ICMAPT(
-        #                                 obs_dim,
-        #                                 action_dim,
-        #                                 knn_rms=True, 
-        #                                 knn_k=knn_k, 
-        #                                 knn_avg=True, 
-        #                                 knn_clip=0.0,
-        #                                 icm_rep_dim=32,
-        #                                 inverse_lr=3e-4,
-        #                                 forward_lr=3e-4)
-            
-        #     print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
-        #     self.reward_model.inverse_model, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
-
-        # if cfg.intrinsic_module == 'giril_apt':
-        #     self.reward_model = GIRILAPT(
-        #                                 obs_dim,
-        #                                 action_dim,
-        #                                 knn_rms=True, 
-        #                                 knn_k=knn_k, 
-        #                                 knn_avg=True, 
-        #                                 knn_clip=0.0,
-        #                                 lr=3e-4,
-        #                                 )
-        #     print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
-        #     self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
-
-        
 
     @property
     def agents(self):
