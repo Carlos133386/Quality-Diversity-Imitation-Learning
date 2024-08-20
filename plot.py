@@ -147,7 +147,8 @@ if __name__ == '__main__':
         "mCondRegICM-mCuriosity": ",",
         "mCondRegICM-mEntropy": ',',
         "mCondRegICM-fCondmEntropy": ',',
-        "Expert": '*'
+        "GIRIL": ',',
+        "PPGA-trueReward": '*'
     }
     colors = {
         "GAIL": "tab:brown",
@@ -169,13 +170,14 @@ if __name__ == '__main__':
         "mCondRegICM-mEntropy": "yellow",
         "mCondRegICM-fCondmEntropy": "orange",
         "mCondRegICM-fCondmEntropy": "pink",
-        "Expert": "black"
+        "GIRIL": 'grey',
+        "PPGA-trueReward": "black"
     }
-    # ext_str='_GAILs'
-    ext_str='_ICMs'
+    ext_str='_GAILs'
+    # ext_str='_ICMs'
     if ext_str == '_GAILs':
         methods = [
-                    "expert",
+                    "PPGA-trueReward",
 
                     "gail",
                     "m_cond_gail",
@@ -183,15 +185,15 @@ if __name__ == '__main__':
                     "m_reg_gail_measure_entropy",
                     "m_reg_gail_fitness_cond_measure_entropy",
                     # "m_reg_gail_weighted_fitness_cond_measure_entropy",
-                    # "m_cond_reg_gail",
+                    "m_cond_reg_gail",
                     # "m_cond_reg_gail_measure_entropy",
                     # "m_cond_reg_gail_fitness_cond_measure_entropy",
 
-                    # "vail",
+                    "vail",
                     # "giril",
                 ]
         labels =  [
-                    "Expert",
+                    "PPGA-trueReward",
 
                     "GAIL",
                     "mCondGAIL",
@@ -199,9 +201,11 @@ if __name__ == '__main__':
                     "mRegGAIL-mEntropy",
                     "mRegGAIL-fCondmEntropy",
                     # "mRegGAIL-WfCondmEntropy",
-                    # "mCondRegGAIL-mCuriosity",
+                    "mCondRegGAIL-mCuriosity",
                     # "mCondRegGAIL-mEntropy",
                     # "mCondRegGAIL-fCondmEntropy",
+
+                    "VAIL",
                 ]
     if ext_str == '_ICMs':
         methods = [
@@ -212,29 +216,35 @@ if __name__ == '__main__':
                     "m_reg_icm",
                     "m_reg_icm_measure_entropy",
                     "m_reg_icm_fitness_cond_measure_entropy",
-                    # "m_cond_reg_icm",
+                    "m_cond_reg_icm",
                     # "m_cond_reg_icm_measure_entropy",
                     # "m_cond_reg_icm_fitness_cond_measure_entropy",
+                    "giril",
                 ]
         labels =  [
-                    "Expert",
+                    "PPGA-trueReward",
 
                     "ICM",
                     "mCondICM",
                     "mRegICM-mCuriosity",
                     "mRegICM-mEntropy",
                     "mRegICM-fCondmEntropy",
-                    # "mCondRegICM-mCuriosity",
+                    "mCondRegICM-mCuriosity",
                     # "mCondRegICM-mEntropy",
                     # "mCondRegICM-fCondmEntropy",
+
+                    "GIRIL",
                 ]
 
 
-    games = ["walker2d", "humanoid", "ant", ] #
+    games = [ "ant" ] # "walker2d", "humanoid",
     seeds=[1111] #,2222
     # resultsfolder="experiments_best_elite"
     # resultsfolder="experiments_100_random_elite"
-    resultsfolder='experiments_4_random_elite_with_measures'
+    # resultsfolder='experiments_4_random_elite_with_measures'
+    data_str='good_and_diverse_elite_with_measures_top500'
+    num_demo=8
+    resultsfolder=f'experiments_{num_demo}_{data_str}'
     results_dict= {game: get_method_scores(resultsfolder,game,methods,labels,seeds) for game in games}
     # times, qd_scores, coverages, best_perf, avg_perf
     times_dict = {game: results_dict[game][0] for game in games}

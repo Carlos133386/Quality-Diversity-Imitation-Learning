@@ -11,3 +11,4 @@ wandb
 */*/*/__pycache__/
 trajs_best*
 trajs_random*
+.DS_Store

@@ -1644,27 +1644,20 @@ class Encoder(nn.Module):
 
 class GIRIL(object):
     def __init__(self,
-                 env,
-                 state_dim,
+                 obs_dim,
                  action_dim,
                  hidden_dim=100,
                  device='cuda:0',
                  lr=3e-4,
                  ):
 
-        self.env = env
         self.device = device
-        self.encoder = Encoder(latent_dim=state_dim, action_dim=action_dim,
+        self.encoder = Encoder(latent_dim=obs_dim, action_dim=action_dim,
                                      hidden_dim=hidden_dim).to(device)
-        self.forward_dynamics_model = ForwardDynamicsModel(state_dim=state_dim, action_dim=action_dim,
+        self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim,
                                                       hidden_dim=hidden_dim).to(device)
         self.lr = lr
         
-        self.obs_shape = self.env.observation_space.shape
-        if len(self.obs_shape)==3:
-            self.action_dim = self.env.action_space.n
-        if len(self.obs_shape)==1:
-            self.action_dim = self.env.action_space.shape[0]
 
         self.optim = optim.Adam(
                                 [
@@ -1714,8 +1707,7 @@ class GIRIL(object):
             processed_pred_next_state = process(pred_next_state, normalize=True, range=(-1, 1))
             reward = F.mse_loss(processed_pred_next_state, processed_next_state, reduction='none')
             reward = torch.mean(reward, (0, 1, 3))
-            z, mu, logvar = self.encoder.forward(state,next_state)
-        return reward, mu, logvar
+        return reward
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -2029,3 +2021,54 @@ if __name__ == '__main__':
                                                                     reward_model_file_name))
                 torch.save([reward_model.inverse_model, reward_model.forward_dynamics_model], reward_model_file_name)
              
+    if args.intrinsic_module == 'giril':
+        reward_model = GIRIL(
+                           obs_dim, 
+                            action_dim,
+                            lr=3e-4)
+        
+        with open(intrinsic_log_file_name, 'w') as f:
+            head = 'Epoch,VAE_loss,Recon_loss,KLD_loss,Action_loss,IntrinsicReward\n'
+            f.write(head)
+            
+        dataset, dataloader = load_sa_data(args, return_next_state=True)
+        for e in range(args.intrinsic_epoch):
+            e_vae_loss = 0
+            e_recon_loss = 0
+            e_kld_loss = 0
+            e_action_loss = 0
+            e_reward = 0
+            for i, (state, action, next_state, measure, next_measure) in enumerate(dataloader):
+                state = state.to(device)
+                action = action.to(device)
+                next_state = next_state.to(device)
+                vae_loss, recon_loss, kld_loss, action_loss, action_logit = \
+                    reward_model.fit_batch(state, action, next_state,
+                                           lambda_action=0.01,
+                                           kld_loss_beta=1.0
+                                           )
+
+                rewards = reward_model.calculate_intrinsic_reward(state, action, next_state)[0]
+                e_vae_loss += vae_loss.item()
+                e_recon_loss += recon_loss.item()
+                e_kld_loss += kld_loss.item()
+                e_action_loss += action_loss.item()
+                e_reward += torch.mean(rewards).item()
+            
+            e_vae_loss /= (i+1)
+            e_recon_loss /= (i+1)
+            e_kld_loss /= (i+1)
+            e_action_loss /= (i+1)
+            e_reward /= (i+1)
+            if (e+1) % 50 == 0:
+                print('Epoch:', e+1, '%s-%s Loss - VAE loss: %s, Recon loss: %s, KLD loss: %s and Action loss: %s,  Rewards: %s' \
+                    % ( args.intrinsic_module, short_env_name, \
+                        e_vae_loss, e_recon_loss, e_kld_loss, e_action_loss, e_reward))
+            
+                result_str = f'{e+1},{e_vae_loss},{e_recon_loss},{e_kld_loss},{e_action_loss},{e_reward}\n'
+                with open(intrinsic_log_file_name, 'a') as f:
+                    f.write(result_str)
+            if (e+1) % args.intrinsic_save_interval == 0:
+                print('Saving the pretrained %s epochs %s as %s' % (e+1, args.intrinsic_module, \
+                                                                    reward_model_file_name))
+                torch.save([reward_model.encoder, reward_model.forward_dynamics_model], reward_model_file_name)             

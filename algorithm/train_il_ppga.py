@@ -24,7 +24,7 @@ from utils.normalize import ReturnNormalizer, ObsNormalizer
 from utils.utilities import save_cfg
 from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint, archive_df_to_archive
 from envs.brax_custom import reward_offset
-from algorithm.learn_url_reward import ICM, InverseModel, ForwardDynamicsModel, GAIL, VAIL
+from algorithm.learn_url_reward import ICM, InverseModel, ForwardDynamicsModel, GAIL, VAIL, GIRIL, Encoder
 from algorithm.learn_url_reward import load_sa_data
 import pdb
 

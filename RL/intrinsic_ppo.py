@@ -20,7 +20,7 @@ from models.actor_critic import Actor, Critic, QDCritic
 from tqdm import tqdm 
 
 from algorithm.learn_url_reward import ICM, mCondICM, mRegICM, mCondRegICM, InverseModel, ForwardDynamicsModel, \
-    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL 
+    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL, Encoder 
 from algorithm.learn_url_reward import load_sa_data 
 import pdb
 
