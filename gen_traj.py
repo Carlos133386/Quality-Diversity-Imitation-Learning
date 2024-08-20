@@ -185,6 +185,88 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
         elites.append(elite)
     return elites, selected_indices, archive._measures_arr, archive._measures_arr[topk_indices]
 
+def sample_top_HalfMax_diverse_elites(archive, num_demo=4):
+    """Randomly samples elites from the archive.
+
+    Currently, this sampling is done uniformly at random. Furthermore, each
+    sample is done independently, so elites may be repeated in the sample.
+    Additional sampling methods may be supported in the future.
+
+    Since :namedtuple:`EliteBatch` is a namedtuple, the result can be
+    unpacked (here we show how to ignore some of the fields)::
+
+        solution_batch, objective_batch, measures_batch, *_ = \\
+            archive.sample_elites(32)
+
+    Or the fields may be accessed by name::
+
+        elite = sample_top_k_diverse_elites(archive, topk=100, num_demo=4) 
+        elite.solution_batch
+        elite.objective_batch
+        ...
+
+    Args:
+        n (int): Number of elites to sample.
+    Returns:
+        EliteBatch: A batch of good and diverse elites selected from the archive.
+    Raises:
+        IndexError: The archive is empty.
+    """
+    if archive.empty:
+        raise IndexError("No elements in archive.")
+
+    ord_indices = np.arange(archive._num_occupied)
+    occupied_indices = archive._occupied_indices[ord_indices]
+    archive._solution_arr = archive._solution_arr[occupied_indices]
+    archive._objective_arr = archive._objective_arr[occupied_indices]
+    archive._measures_arr = archive._measures_arr[occupied_indices]
+    archive._metadata_arr = archive._metadata_arr[occupied_indices]
+
+    max_fitness = archive._objective_arr.max()
+    topk_indices = np.where(archive._objective_arr>max_fitness*0.5)[0]
+    
+    # Farthest Point Sampling
+    #https://medium.com/@konyakinsergey/farthest-point-sampling-for-k-means-clustering-23a6dfc2dfb1
+    data = archive._measures_arr[topk_indices]
+    initial_centroid_idx = 0 # set the best elite as the initial centroid 
+    # initial_centroid_idx = np.random.randint(topk) # Get random data point index
+    initial_centroid = data[initial_centroid_idx]           # Retrieve the data point associated with that index
+    centroids = [initial_centroid]                          # Put the data point into a list with centroid locations
+    
+    centroid_indices = [initial_centroid_idx]
+    num_centorids = num_demo
+    for i in range(1, num_centorids):
+        distances = []
+
+        # 3. Repeat 1 and 2 for each data point
+        for x in data:
+            # 1. Find distances between a point and all centroids
+            dists = euclidean_dist(x, centroids)
+            # 2. Save the min distance 
+            distances.append(np.min(dists))
+
+        # 4. Append the point with maximum distance; 
+        # this will be the new farthest centroid
+        max_idx = np.argmax(distances)
+        centroids.append(data[max_idx])
+        centroid_indices.append(max_idx)
+
+    centroids = np.array(centroids)
+    selected_indices = topk_indices[centroid_indices]
+    
+    elites = []
+    for i in range(num_demo):
+        selected_indices_ = np.asarray([selected_indices[i]])
+        elite =  EliteBatch(
+                        readonly(archive._solution_arr[selected_indices_]),
+                        readonly(archive._objective_arr[selected_indices_]),
+                        readonly(archive._measures_arr[selected_indices_]),
+                        readonly(selected_indices_),
+                        readonly(archive._metadata_arr[selected_indices_]),
+                    )
+        elites.append(elite)
+    return elites, selected_indices, archive._measures_arr, archive._measures_arr[topk_indices]
+
 def get_good_and_diverse_elite(elite, actor_cfg):
     print(f'Loading agent with reward {elite.objective_batch[0]} and measures {elite.measures_batch[0]}')
     agent = Actor(obs_shape=actor_cfg.obs_shape[0], action_shape=actor_cfg.action_shape, normalize_obs=normalize_obs, normalize_returns=normalize_rewards).deserialize(elite.solution_batch.flatten()).to(device)
@@ -269,7 +351,7 @@ def gen_1_traj(env, agent, actor_cfg, env_cfg, render=False, deterministic=True)
     
 
 def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant', 
-                    topk=100):
+                    topk=500):
     print(env_name, '='*100)
     env, scheduler, actor_cfg, env_cfg = config_env(env_name)
 
@@ -291,8 +373,12 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
 
     i = 0
     if agent_type == 'good_and_diverse':
-        elites, selected_indices, full_occupied_measures, topk_occupied_measures = \
-            sample_top_k_diverse_elites(scheduler.archive, topk=topk, num_demo=num_demo)
+        if topk != 'HalfMax':
+            elites, selected_indices, full_occupied_measures, topk_occupied_measures = \
+                sample_top_k_diverse_elites(scheduler.archive, topk=topk, num_demo=num_demo)
+        else:
+            elites, selected_indices, full_occupied_measures, topk_occupied_measures = \
+                sample_top_HalfMax_diverse_elites(scheduler.archive, num_demo=num_demo)
     for i in range(num_demo):
         if agent_type == 'best':
             agent, demonstrator_measure = get_best_elite(scheduler, actor_cfg)
@@ -354,7 +440,7 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
         traj['demonstrator_indices'] = selected_indices
         traj['full_occupied_measures'] = full_occupied_measures
         traj['topk_occupied_measures'] = topk_occupied_measures
- 
+    
     
     file_name = f'{traj_root}/{num_demo}episodes/trajs_ppga_{env_name}.pt'
     pickle.dump(traj, open(file_name, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
@@ -366,12 +452,13 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
 # topk=350
 # topk=400
 # topk=450
-topk=500
+# topk=500
 # topk=600
 # topk=700
 # topk=800
 # topk=900
 # topk=1000
+topk='HalfMax'
 for num_demo in [4, 8, 16, 32, 64]:
     for env_name in ['ant', 'walker2d', 'humanoid']: # 
         # gen_multi_trajs(agent_type='best', num_demo=num_demo, env_name=env_name)
