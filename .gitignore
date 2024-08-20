@@ -1,10 +1,13 @@
-trajs*
 reward*
 experiment*
 checkpoints
 wandb
 *.whl
 .idea
-log.txt
-
-
+*.txt
+*.zip
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+trajs_best*
+trajs_random*
