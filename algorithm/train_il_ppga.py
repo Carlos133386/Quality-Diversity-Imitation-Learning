@@ -533,8 +533,7 @@ if __name__ == '__main__':
                      wandb_project=cfg.wandb_project, wandb_group=cfg.wandb_group, cfg=cfg)
     outdir = os.path.join(cfg.expdir, str(cfg.seed))
     if 'm_reg' in cfg.intrinsic_module:
-        if cfg.bonus_type != 'measure_error':
-            outdir = os.path.join(f'{cfg.expdir}_{cfg.bonus_type}', str(cfg.seed))
+        outdir = os.path.join(f'{cfg.expdir}_RegLoss_{cfg.auxiliary_loss_fn}_Bonus_{cfg.bonus_type}', str(cfg.seed))
     if 'acgail' in cfg.intrinsic_module:
         outdir = os.path.join(f'{cfg.expdir}_AuxLoss_{cfg.auxiliary_loss_fn}_Bonus_{cfg.bonus_type}', str(cfg.seed))
             
