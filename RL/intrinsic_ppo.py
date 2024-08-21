@@ -20,7 +20,7 @@ from models.actor_critic import Actor, Critic, QDCritic
 from tqdm import tqdm 
 
 from algorithm.learn_url_reward import ICM, mCondICM, mRegICM, mCondRegICM, InverseModel, ForwardDynamicsModel, \
-    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL, Encoder 
+    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL, Encoder, mACGAIL, mCondACGAIL
 from algorithm.learn_url_reward import load_sa_data 
 import pdb
 
@@ -139,11 +139,38 @@ class PPO:
                                                          return_next_state=False)
             self.update_reward_model = True
 
+        if cfg.intrinsic_module == 'm_acgail':
+            self.reward_model = mACGAIL(
+                                            obs_dim,
+                                            action_dim,
+                                            measure_dim=self.cfg.num_dims,
+                                            auxiliary_loss_fn=self.cfg.auxiliary_loss_fn,
+                                            bonus_type=self.cfg.bonus_type,
+                                            device='cuda:0',
+                                            lr=3e-4)
+            self.dataset, self.dataloader = load_sa_data(cfg,  
+                                                         return_next_state=False)
+            self.update_reward_model = True
+        
+        if cfg.intrinsic_module == 'm_cond_acgail':
+            self.reward_model = mCondACGAIL(
+                                            obs_dim,
+                                            action_dim,
+                                            measure_dim=self.cfg.num_dims,
+                                            auxiliary_loss_fn=self.cfg.auxiliary_loss_fn,
+                                            bonus_type=self.cfg.bonus_type,
+                                            device='cuda:0',
+                                            lr=3e-4)
+            self.dataset, self.dataloader = load_sa_data(cfg,  
+                                                         return_next_state=False)
+            self.update_reward_model = True
+
         if cfg.intrinsic_module == 'm_reg_gail':
             self.reward_model = mRegGAIL(
                                             obs_dim,
                                             action_dim,
                                             measure_dim=self.cfg.num_dims,
+                                            reg_loss_fn=self.cfg.auxiliary_loss_fn,
                                             bonus_type=self.cfg.bonus_type,
                                             device='cuda:0',
                                             lr=3e-4)
@@ -156,6 +183,7 @@ class PPO:
                                             obs_dim,
                                             action_dim,
                                             measure_dim=self.cfg.num_dims,
+                                            reg_loss_fn=self.cfg.auxiliary_loss_fn, 
                                             bonus_type=self.cfg.bonus_type,
                                             device='cuda:0',
                                             lr=3e-4)
@@ -200,6 +228,7 @@ class PPO:
                                         obs_dim,
                                         action_dim,
                                         measure_dim=self.cfg.num_dims,
+                                        reg_loss_fn=self.cfg.auxiliary_loss_fn,
                                         bonus_type=self.cfg.bonus_type,
                                         inverse_lr=3e-4,
                                         forward_lr=3e-4)
@@ -212,6 +241,7 @@ class PPO:
                                         obs_dim,
                                         action_dim,
                                         measure_dim=self.cfg.num_dims,
+                                        reg_loss_fn=self.cfg.auxiliary_loss_fn,
                                         bonus_type=self.cfg.bonus_type,
                                         inverse_lr=3e-4,
                                         forward_lr=3e-4)
@@ -497,8 +527,9 @@ class PPO:
                         if self.intrinsic_module == 'gail' or self.intrinsic_module=='vail':
                             intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                 self.obs[step], action).squeeze()
-                        elif self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_reg_gail']:
-                            if 'fitness_cond' in self.cfg.bonus_type and 'm_reg' in self.intrinsic_module:
+                        elif self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_reg_gail', 
+                                                       'm_acgail', 'm_cond_acgail']:
+                            if 'fitness_cond' in self.cfg.bonus_type:
                                 intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                     self.obs[step], action, self.measures[step], self.values[step]).squeeze()
                             else:
@@ -509,7 +540,7 @@ class PPO:
                                                 self.obs[step], action, self.next_obs,
                                                 self.measures[step], self.next_measure)
                         elif self.intrinsic_module == 'm_reg_icm':
-                            if 'fitness_cond' in self.cfg.bonus_type and 'm_reg' in self.intrinsic_module:
+                            if 'fitness_cond' in self.cfg.bonus_type:
                                 intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                     self.obs[step], action, self.next_obs,
                                                     self.measures[step], self.values[step])
@@ -577,7 +608,7 @@ class PPO:
                     reward_loss = self.reward_model.update(self.dataloader, self.cfg.num_minibatches, 
                                                            b_obs.detach(), b_actions.detach())        
 
-                if self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_vail', 'm_reg_vail']:
+                if self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_acgail', 'm_cond_acgail']:
                     b_measures = self.measures.transpose(0, 1).reshape(num_agents, -1, self.cfg.num_dims)
                     reward_loss = self.reward_model.update(self.dataloader, self.cfg.num_minibatches, 
                                                            b_obs.detach(), b_actions.detach(), b_measures.detach())        

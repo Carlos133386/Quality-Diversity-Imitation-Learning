@@ -159,11 +159,11 @@ def load_sa_data(args, return_next_state=True):
 # Inverse Dynamics model
 class InverseModel(nn.Module):
 
-    def __init__(self, latent_dim, action_dim,
+    def __init__(self, input_dim, action_dim,
                  hidden_dim):
 
         super(InverseModel, self).__init__()
-        self.input_dim = latent_dim
+        self.input_dim = input_dim
         self.output_dim = action_dim
         self.hidden = hidden_dim
 
@@ -243,11 +243,11 @@ class ForwardDynamicsModel(nn.Module):
 # GAIL discriminator
 class GAILdiscriminator(nn.Module):
 
-    def __init__(self, latent_dim, 
+    def __init__(self, input_dim, 
                  hidden_dim, action_dim):
 
         super(GAILdiscriminator, self).__init__()
-        self.input_dim = latent_dim
+        self.input_dim = input_dim
         self.output_dim = 1
         self.hidden = hidden_dim
         self.action_dim = action_dim 
@@ -280,11 +280,11 @@ class GAILdiscriminator(nn.Module):
 # VAIL discriminator
 class VAILdiscriminator(nn.Module):
 
-    def __init__(self, latent_dim, 
+    def __init__(self, input_dim, 
                  hidden_dim, action_dim):
 
         super(VAILdiscriminator, self).__init__()
-        self.input_dim = latent_dim
+        self.input_dim = input_dim
         self.output_dim = 1
         self.hidden = hidden_dim
         self.action_dim = action_dim 
@@ -325,6 +325,44 @@ class VAILdiscriminator(nn.Module):
 
         return out, mus, sigmas
 
+# ACGAIL discriminator
+class ACGAILdiscriminator(nn.Module):
+
+    def __init__(self, input_dim, hidden_dim, action_dim, measure_dim):
+
+        super(ACGAILdiscriminator, self).__init__()
+        self.input_dim = input_dim
+        self.hidden = hidden_dim
+        self.action_dim = action_dim 
+        self.measure_dim = measure_dim
+
+        # discriminator architecture
+        self.linear_1 = nn.Linear(in_features=self.input_dim+self.action_dim, out_features=self.hidden)
+        self.linear_2 = nn.Linear(in_features=self.hidden, out_features=self.hidden)
+        self.output_d = nn.Linear(in_features=self.hidden, out_features=1)
+        self.output_m = nn.Linear(in_features=self.hidden, out_features=self.measure_dim)
+
+        # Leaky relu activation
+        self.tanh_1 = nn.Tanh()
+        self.tanh_2 = nn.Tanh()
+
+        # Output Activation
+
+        # Initialize the weights using xavier initialization
+        nn.init.xavier_uniform_(self.linear_1.weight)
+        nn.init.xavier_uniform_(self.linear_2.weight)
+        nn.init.xavier_uniform_(self.output_d.weight)
+        nn.init.xavier_uniform_(self.output_m.weight)
+
+    def forward(self, x):
+        x = self.linear_1(x)
+        x = self.tanh_1(x)
+        x = self.linear_2(x)
+        x = self.tanh_2(x)
+        d = self.output_d(x)
+        m = self.output_m(x)
+        return d, m
+    
 ### GAIL 
 class GAIL(object):
     def __init__(self,
@@ -338,7 +376,7 @@ class GAIL(object):
         self.device = device
         self.action_dim = action_dim
         
-        self.discriminator = GAILdiscriminator(latent_dim=obs_dim,  \
+        self.discriminator = GAILdiscriminator(input_dim=obs_dim,  \
                                      hidden_dim=100, action_dim=self.action_dim).to(device)
 
 
@@ -478,7 +516,7 @@ class mCondGAIL(object):
         self.device = device
         self.action_dim = action_dim
         
-        self.discriminator = GAILdiscriminator(latent_dim=obs_dim+measure_dim,  \
+        self.discriminator = GAILdiscriminator(input_dim=obs_dim+measure_dim,  \
                                      hidden_dim=100, action_dim=self.action_dim).to(device)
 
 
@@ -610,12 +648,394 @@ class mCondGAIL(object):
             else:
                 return reward / np.sqrt(self.ret_rms.var[0] + alpha)
 
+# measure-targeted Auxiliary Classifier GAIL
+class mACGAIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim,
+                 auxiliary_loss_fn='MSE',
+                 bonus_type=None,
+                 device='cuda:0',
+                 lr=3e-4,
+                 ):
+
+
+        self.device = device
+        self.action_dim = action_dim
+        self.measure_dim = measure_dim
+        self.auxiliary_loss_fn = auxiliary_loss_fn
+        self.bonus_type = bonus_type
+        if self.bonus_type == 'measure_entropy':
+            rms = RMS(self.device)
+            knn_rms = False
+            knn_k = 500
+            knn_avg = True
+            knn_clip = 0.0
+            self.pbe = PBE(rms, knn_clip, knn_k, knn_avg, knn_rms, self.device)
+        if 'fitness_cond_measure_entropy' in self.bonus_type:
+            knn_k = 500
+            self.vcse = VCSE(knn_k)
+        
+        self.discriminator = ACGAILdiscriminator(input_dim=obs_dim, hidden_dim=100, 
+                                                 action_dim=self.action_dim, measure_dim=self.measure_dim).to(device)
+
+
+        self.lr = lr
+        self.intrinsic_reward_rms = RMS(device=self.device)
+
+        self.gail_optim = optim.Adam(
+                                [
+                                    {'params': self.discriminator.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+        
+        self.returns = None
+        self.ret_rms = RunningMeanStd(shape=())
+        self.ob_rms = RunningMeanStd(shape=())
+
+    def compute_grad_pen(self,
+                        expert_state,
+                        expert_action,
+                        policy_state,
+                        policy_action,
+                        lambda_=10):
+
+       expert_data = torch.cat([expert_state, expert_action], dim=1)
+       policy_data = torch.cat([policy_state, policy_action], dim=1)
+
+       alpha = torch.rand_like(expert_data).to(expert_data.device)
+
+       mixup_data = alpha * expert_data + (1 - alpha) * policy_data
+       mixup_data.requires_grad = True
+
+       disc, _ = self.discriminator(mixup_data)
+       ones = torch.ones(disc.size()).to(disc.device)
+       grad = autograd.grad(
+           outputs=disc,
+           inputs=mixup_data,
+           grad_outputs=ones,
+           create_graph=True,
+           retain_graph=True,
+           only_inputs=True)[0]
+
+       grad_pen = lambda_ * (grad.norm(2, dim=1) - 1).pow(2).mean()
+       return grad_pen
+
+    def feed_forward_generator(self,
+                               b_obs, 
+                               b_actions,
+                               b_measure,
+                               num_minibatches,
+                               minibatch_size=None):
+
+        batch_size = b_obs.shape[1]
+        if minibatch_size is None:
+            minibatch_size = batch_size // num_minibatches
+        sampler = BatchSampler(
+            SubsetRandomSampler(range(batch_size)),
+            minibatch_size,
+            drop_last=True)
+        for indices in sampler:
+            obs_batch = b_obs.view(-1, b_obs.shape[-1])[indices]
+            actions_batch = b_actions.view(-1, b_actions.shape[-1])[indices]
+            measure_batch = b_measure.view(-1, b_measure.shape[-1])[indices] 
+
+            yield obs_batch, actions_batch, measure_batch
+
+    def update(self, expert_loader, num_minibatches, b_obs, b_actions, b_measure, obsfilt=None):
+        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, b_measure, 
+                                                            num_minibatches, expert_loader.batch_size)
+
+        loss = 0
+        n = 0
+        for expert_batch, policy_batch in zip(expert_loader,
+                                              policy_data_generator):
+            policy_state, policy_action, policy_measure = policy_batch[0], policy_batch[1], policy_batch[2]
+            policy_d, policy_m_pred = self.discriminator(
+                torch.cat([policy_state, policy_action], dim=1))
+
+            expert_state, expert_action, expert_measure = expert_batch
+            if obsfilt is not None:
+                expert_state = obsfilt(expert_state.numpy(), update=False)
+            
+            expert_state = torch.FloatTensor(expert_state).to(self.device)
+            expert_action = expert_action.to(self.device)
+            expert_measure = expert_measure.to(self.device)
+            expert_d, expert_m_pred = self.discriminator(
+                torch.cat([expert_state, expert_action], dim=1))
+
+            expert_d_loss = F.binary_cross_entropy_with_logits(
+                expert_d,torch.ones(expert_d.size()).to(self.device))
+            if self.auxiliary_loss_fn == 'MSE':
+                expert_m_loss = F.mse_loss(expert_m_pred, expert_measure)
+            elif self.auxiliary_loss_fn == 'NLL':
+                expert_m_loss = NLL_loss(expert_m_pred, expert_measure)
+            else:
+                expert_m_loss = 0
+
+            expert_loss = expert_d_loss + expert_m_loss
+            
+            policy_d_loss = F.binary_cross_entropy_with_logits( 
+                policy_d, torch.zeros(policy_d.size()).to(self.device))
+            if self.auxiliary_loss_fn == 'MSE':
+                policy_m_loss = F.mse_loss(policy_m_pred, policy_measure)
+            elif self.auxiliary_loss_fn == 'NLL':
+                policy_m_loss = NLL_loss(policy_m_pred, policy_measure)
+            else:
+                policy_m_loss = 0 
+
+            policy_loss = policy_d_loss + policy_m_loss 
+
+            gail_loss = expert_loss + policy_loss
+            grad_pen = self.compute_grad_pen(expert_state, expert_action,
+                                            policy_state, policy_action)
+
+            loss += (gail_loss + grad_pen).item()
+            n += 1
+
+            self.gail_optim.zero_grad()
+            (gail_loss + grad_pen).backward()
+            self.gail_optim.step()
+        return loss / n
+
+    def calculate_intrinsic_reward(self, state, action, measure, value=None,
+                       use_original_reward=True, alpha=1e-8, reward_type='log1-d'):
+        with torch.no_grad():
+            d, m = self.discriminator(torch.cat([state, action], dim=1))
+            s = torch.sigmoid(d)  
+            # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
+            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            if reward_type == 'logd':
+                gail_reward =  torch.log(s + alpha)
+            if reward_type == 'log1-d':
+                gail_reward =  - torch.log(1 - s + alpha)
+            
+            gail_reward = gail_reward.squeeze(1)
+            if self.bonus_type is not None:
+                if self.bonus_type == 'measure_error':
+                    bonus = F.mse_loss(m, measure, reduction='none').mean(dim=1)
+                if self.bonus_type == 'measure_entropy':
+                    bonus = self.pbe(measure).squeeze(1)
+                if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
+                    bonus = self.vcse(measure, value)[0].squeeze(1)
+
+                reward = gail_reward + bonus 
+            else:
+                reward = gail_reward
+
+            if self.returns is None:
+                self.returns = reward.clone()
+
+            if use_original_reward:
+                return reward 
+            else:
+                return reward / np.sqrt(self.ret_rms.var[0] + alpha)
+
+# measure conditioned Auxiliary Classifier GAIL
+class mCondACGAIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim, 
+                 auxiliary_loss_fn='MSE',
+                 bonus_type=None,
+                 device='cuda:0',
+                 lr=3e-4,
+                 ):
+
+
+        self.device = device
+        self.action_dim = action_dim
+        self.auxiliary_loss_fn = auxiliary_loss_fn
+        self.bonus_type = bonus_type
+        if self.bonus_type == 'measure_entropy':
+            rms = RMS(self.device)
+            knn_rms = False
+            knn_k = 500
+            knn_avg = True
+            knn_clip = 0.0
+            self.pbe = PBE(rms, knn_clip, knn_k, knn_avg, knn_rms, self.device)
+        if 'fitness_cond_measure_entropy' in self.bonus_type:
+            knn_k = 500
+            self.vcse = VCSE(knn_k)
+        
+        self.discriminator = ACGAILdiscriminator(input_dim=obs_dim+measure_dim,  \
+                                     hidden_dim=100, action_dim=self.action_dim,
+                                     measure_dim=measure_dim).to(device)
+
+
+        self.lr = lr
+        self.intrinsic_reward_rms = RMS(device=self.device)
+
+        self.gail_optim = optim.Adam(
+                                [
+                                    {'params': self.discriminator.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+        
+        self.returns = None
+        self.ret_rms = RunningMeanStd(shape=())
+        self.ob_rms = RunningMeanStd(shape=())
+
+    def compute_grad_pen(self,
+                        expert_state,
+                        expert_action,
+                        policy_state,
+                        policy_action,
+                        lambda_=10):
+
+       expert_data = torch.cat([expert_state, expert_action], dim=1)
+       policy_data = torch.cat([policy_state, policy_action], dim=1)
+
+       alpha = torch.rand_like(expert_data).to(expert_data.device)
+
+       mixup_data = alpha * expert_data + (1 - alpha) * policy_data
+       mixup_data.requires_grad = True
+
+       disc, _ = self.discriminator(mixup_data)
+       ones = torch.ones(disc.size()).to(disc.device)
+       grad = autograd.grad(
+           outputs=disc,
+           inputs=mixup_data,
+           grad_outputs=ones,
+           create_graph=True,
+           retain_graph=True,
+           only_inputs=True)[0]
+
+       grad_pen = lambda_ * (grad.norm(2, dim=1) - 1).pow(2).mean()
+       return grad_pen
+
+    def feed_forward_generator(self,
+                               b_obs, 
+                               b_actions,
+                               b_measure,
+                               num_minibatches,
+                               minibatch_size=None):
+
+        batch_size = b_obs.shape[1]
+        if minibatch_size is None:
+            minibatch_size = batch_size // num_minibatches
+        sampler = BatchSampler(
+            SubsetRandomSampler(range(batch_size)),
+            minibatch_size,
+            drop_last=True)
+        for indices in sampler:
+            obs_batch = b_obs.view(-1, b_obs.shape[-1])[indices]
+            actions_batch = b_actions.view(-1, b_actions.shape[-1])[indices]
+            measure_batch = b_measure.view(-1, b_measure.shape[-1])[indices] 
+
+            yield obs_batch, actions_batch, measure_batch
+
+
+    def update(self, expert_loader, num_minibatches, b_obs, b_actions, b_measure, obsfilt=None):
+        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, b_measure, \
+                                    num_minibatches, expert_loader.batch_size)
+
+        loss = 0
+        n = 0
+        for expert_batch, policy_batch in zip(expert_loader,
+                                              policy_data_generator):
+            policy_state, policy_action, policy_measure = policy_batch[0], policy_batch[1], policy_batch[2]
+            policy_d, policy_m_pred = self.discriminator(
+                torch.cat([policy_state, policy_measure, policy_action], dim=1))
+
+            expert_state, expert_action, expert_measure = expert_batch
+            if obsfilt is not None:
+                expert_state = obsfilt(expert_state.numpy(), update=False)
+            
+            expert_state = torch.FloatTensor(expert_state).to(self.device)
+            expert_action = expert_action.to(self.device)
+            expert_measure = expert_measure.to(self.device)
+            expert_d, expert_m_pred = self.discriminator(
+                torch.cat([expert_state, expert_measure, expert_action], dim=1))
+
+            expert_d_loss = F.binary_cross_entropy_with_logits(
+                expert_d,
+                torch.ones(expert_d.size()).to(self.device))
+            if self.auxiliary_loss_fn == 'MSE':
+                expert_m_loss = F.mse_loss(expert_m_pred, expert_measure)
+            elif self.auxiliary_loss_fn == 'NLL':
+                expert_m_loss = NLL_loss(expert_m_pred, expert_measure)
+            else:
+                expert_m_loss = 0
+
+            expert_loss = expert_d_loss + expert_m_loss
+            
+            policy_d_loss = F.binary_cross_entropy_with_logits( 
+                policy_d,
+                torch.zeros(policy_d.size()).to(self.device))
+            if self.auxiliary_loss_fn == 'MSE':
+                policy_m_loss = F.mse_loss(policy_m_pred, policy_measure)
+            elif self.auxiliary_loss_fn == 'NLL':
+                policy_m_loss = NLL_loss(policy_m_pred, policy_measure)
+            else:
+                policy_m_loss = 0
+
+            policy_loss = policy_d_loss + policy_m_loss 
+
+            gail_loss = expert_loss + policy_loss
+            grad_pen = self.compute_grad_pen(torch.cat([expert_state, expert_measure], dim=1), 
+                                             expert_action,
+                                             torch.cat([policy_state, policy_measure], dim=1), 
+                                             policy_action)
+
+            loss += (gail_loss + grad_pen).item()
+            n += 1
+
+            self.gail_optim.zero_grad()
+            (gail_loss + grad_pen).backward()
+            self.gail_optim.step()
+        return loss / n
+
+    def calculate_intrinsic_reward(self, state, action, measure, value=None,
+                       use_original_reward=True, alpha=1e-8, reward_type='log1-d'):
+        with torch.no_grad():
+            d, m = self.discriminator(torch.cat([state, measure, action], dim=1))
+            s = torch.sigmoid(d)  
+            # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
+            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            if reward_type == 'logd':
+                gail_reward =  torch.log(s + alpha)
+            if reward_type == 'log1-d':
+                gail_reward =  - torch.log(1 - s + alpha)
+
+            gail_reward = gail_reward.squeeze(1)
+            if self.bonus_type is not None:
+                if self.bonus_type == 'measure_error':
+                    bonus = F.mse_loss(m, measure, reduction='none').mean(dim=1)
+                if self.bonus_type == 'measure_entropy':
+                    bonus = self.pbe(measure).squeeze(1)
+                if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
+                    bonus = self.vcse(measure, value)[0].squeeze(1)
+
+                reward = gail_reward + bonus 
+            else:
+                reward = gail_reward
+            
+            if self.returns is None:
+                self.returns = reward.clone()
+
+            if use_original_reward:
+                return reward 
+            else:
+                return reward / np.sqrt(self.ret_rms.var[0] + alpha)
+            
+def NLL_loss(output1, target, eps=1e-12):
+    output = F.softmax(output1, dim=1)
+    l = target * torch.log(output+eps)
+    loss = (-torch.sum(l)) / l.size(0)
+    return loss 
+
 # measure regularized GAIL
 class mRegGAIL(object):
     def __init__(self,
                  obs_dim,
                  action_dim,
                  measure_dim,
+                 reg_loss_fn='MSE',
                  bonus_type='measure_error',
                  device='cuda:0',
                  lr=3e-4,
@@ -624,8 +1044,9 @@ class mRegGAIL(object):
 
         self.device = device
         self.action_dim = action_dim
+        self.reg_loss_fn = reg_loss_fn 
         
-        self.discriminator = GAILdiscriminator(latent_dim=obs_dim,  \
+        self.discriminator = GAILdiscriminator(input_dim=obs_dim,  \
                                      hidden_dim=100, action_dim=self.action_dim).to(device)
         self.measure_predict_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
                                                       hidden_dim=100, output_dim=measure_dim).to(device)
@@ -730,12 +1151,25 @@ class mRegGAIL(object):
                 torch.cat([expert_state, expert_action], dim=1))
             pred_expert_measure = self.measure_predict_model(expert_state, expert_action)
 
-            expert_loss = F.binary_cross_entropy_with_logits(
+            expert_d_loss = F.binary_cross_entropy_with_logits(
                 expert_d,
-                torch.ones(expert_d.size()).to(self.device)) + F.mse_loss(pred_expert_measure, expert_measure)
-            policy_loss = F.binary_cross_entropy_with_logits( 
+                torch.ones(expert_d.size()).to(self.device)) 
+            if self.reg_loss_fn == 'MSE':
+                expert_m_loss = F.mse_loss(pred_expert_measure, expert_measure)
+            if self.reg_loss_fn == 'NLL':
+                expert_m_loss = NLL_loss(pred_expert_measure, expert_measure)
+            expert_loss = expert_d_loss + expert_m_loss 
+
+            policy_d_loss = F.binary_cross_entropy_with_logits( 
                 policy_d,
-                torch.zeros(policy_d.size()).to(self.device)) + F.mse_loss(pred_policy_measure, policy_measure)
+                torch.zeros(policy_d.size()).to(self.device)) 
+            
+            if self.reg_loss_fn == 'MSE':
+                policy_m_loss = F.mse_loss(pred_policy_measure, policy_measure)
+            if self.reg_loss_fn == 'NLL':
+                policy_m_loss = NLL_loss(pred_policy_measure, policy_measure)
+
+            policy_loss = policy_d_loss + policy_m_loss 
 
             gail_loss = expert_loss + policy_loss
             grad_pen = self.compute_grad_pen(expert_state, expert_action,
@@ -803,7 +1237,7 @@ class mCondRegGAIL(object):
         self.device = device
         self.action_dim = action_dim
         
-        self.discriminator = GAILdiscriminator(latent_dim=obs_dim+measure_dim,  \
+        self.discriminator = GAILdiscriminator(input_dim=obs_dim+measure_dim,  \
                                      hidden_dim=100, action_dim=self.action_dim).to(device)
         self.measure_predict_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
                                                       hidden_dim=100, output_dim=measure_dim).to(device)
@@ -908,12 +1342,23 @@ class mCondRegGAIL(object):
                 torch.cat([expert_state, expert_measure, expert_action], dim=1))
             pred_expert_measure = self.measure_predict_model(expert_state, expert_action)
 
-            expert_loss = F.binary_cross_entropy_with_logits(
+            expert_d_loss = F.binary_cross_entropy_with_logits(
                 expert_d,
-                torch.ones(expert_d.size()).to(self.device)) + F.mse_loss(pred_expert_measure, expert_measure)
-            policy_loss = F.binary_cross_entropy_with_logits( 
+                torch.ones(expert_d.size()).to(self.device))
+            if self.reg_loss_fn == 'MSE':
+                expert_m_loss = F.mse_loss(pred_expert_measure, expert_measure)
+            if self.reg_loss_fn == 'NLL':
+                expert_m_loss = NLL_loss(pred_expert_measure, expert_measure)
+            expert_loss = expert_d_loss + expert_m_loss 
+
+            policy_d_loss = F.binary_cross_entropy_with_logits( 
                 policy_d,
-                torch.zeros(policy_d.size()).to(self.device)) + F.mse_loss(pred_policy_measure, policy_measure)
+                torch.zeros(policy_d.size()).to(self.device)) 
+            if self.reg_loss_fn == 'MSE':
+                policy_m_loss = F.mse_loss(pred_policy_measure, policy_measure)
+            if self.reg_loss_fn == 'NLL':
+                policy_m_loss = NLL_loss(pred_policy_measure, policy_measure)
+            policy_loss = policy_d_loss + policy_m_loss 
 
             gail_loss = expert_loss + policy_loss
             grad_pen = self.compute_grad_pen(torch.cat([expert_state, expert_measure], dim=1), 
@@ -979,7 +1424,7 @@ class VAIL(object):
         self.device = device
         self.i_c = i_c
         self.action_dim = action_dim 
-        self.discriminator = VAILdiscriminator(latent_dim=obs_dim,  \
+        self.discriminator = VAILdiscriminator(input_dim=obs_dim,  \
                                      hidden_dim=100, action_dim=self.action_dim).to(device)
 
         self.lr = lr
@@ -1145,7 +1590,7 @@ class ICM(object):
 
         self.device = device
 
-        self.inverse_model = InverseModel(latent_dim=obs_dim, action_dim=action_dim, \
+        self.inverse_model = InverseModel(input_dim=obs_dim, action_dim=action_dim, \
                                      hidden_dim=hidden_dim).to(device)
         self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
                                                       hidden_dim=hidden_dim).to(device)
@@ -1211,7 +1656,7 @@ class mCondICM(object):
 
         self.device = device
 
-        self.inverse_model = InverseModel(latent_dim=obs_dim+measure_dim, action_dim=action_dim, \
+        self.inverse_model = InverseModel(input_dim=obs_dim+measure_dim, action_dim=action_dim, \
                                      hidden_dim=hidden_dim).to(device)
         self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim+measure_dim, action_dim=action_dim, \
                                                       hidden_dim=hidden_dim).to(device)
@@ -1272,6 +1717,7 @@ class mRegICM(object):
                  obs_dim,
                  action_dim,
                  measure_dim,
+                 reg_loss_fn='MSE',
                  bonus_type='measure_error',
                  hidden_dim=100,
                  device='cuda:0',
@@ -1281,7 +1727,7 @@ class mRegICM(object):
 
         self.device = device
 
-        self.inverse_model = InverseModel(latent_dim=obs_dim, action_dim=action_dim, \
+        self.inverse_model = InverseModel(input_dim=obs_dim, action_dim=action_dim, \
                                      hidden_dim=hidden_dim).to(device)
         self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
                                                       hidden_dim=hidden_dim).to(device)
@@ -1290,6 +1736,7 @@ class mRegICM(object):
         self.inverse_lr = inverse_lr
         self.forward_lr = forward_lr
 
+        self.reg_loss_fn = reg_loss_fn
         self.bonus_type = bonus_type
         if self.bonus_type == 'measure_entropy':
             rms = RMS(self.device)
@@ -1332,8 +1779,12 @@ class mRegICM(object):
         pred_next_state = self.forward_dynamics_model(state, action)
         pred_measure = self.measure_predict_model(state, action)
         criterionFD = self.get_forward_dynamics_loss()
-        # FIXME: use proper loss for measure prediction, partial label?
-        forward_loss = criterionFD(pred_next_state, next_state) + criterionFD(pred_measure, measure)
+
+        forward_loss = criterionFD(pred_next_state, next_state) 
+        if self.reg_loss_fn == 'MSE':
+            forward_loss += criterionFD(pred_measure, measure)
+        if self.reg_loss_fn == 'NLL':
+            forward_loss += NLL_loss(pred_measure, measure)
         if train:
             self.forward_optim.zero_grad()
             forward_loss.backward(retain_graph=True)
@@ -1378,6 +1829,7 @@ class mCondRegICM(object):
                  obs_dim,
                  action_dim,
                  measure_dim,
+                 reg_loss_fn='MSE',
                  bonus_type='measure_error',
                  hidden_dim=100,
                  device='cuda:0',
@@ -1387,7 +1839,7 @@ class mCondRegICM(object):
 
         self.device = device
 
-        self.inverse_model = InverseModel(latent_dim=obs_dim+measure_dim, action_dim=action_dim, \
+        self.inverse_model = InverseModel(input_dim=obs_dim+measure_dim, action_dim=action_dim, \
                                      hidden_dim=hidden_dim).to(device)
         self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim+measure_dim, action_dim=action_dim, \
                                                       hidden_dim=hidden_dim).to(device)
@@ -1396,6 +1848,7 @@ class mCondRegICM(object):
         self.inverse_lr = inverse_lr
         self.forward_lr = forward_lr
 
+        self.reg_loss_fn = reg_loss_fn
         self.bonus_type = bonus_type
         if self.bonus_type == 'measure_entropy':
             rms = RMS(self.device)
@@ -1440,8 +1893,13 @@ class mCondRegICM(object):
         pred_next_state_measure = self.forward_dynamics_model(state_measure, action)
         criterionFD = self.get_forward_dynamics_loss()
         pred_measure = self.measure_predict_model(state, action)
-        forward_loss = criterionFD(pred_next_state_measure, next_state_measure) + \
-                       criterionFD(pred_measure, measure)
+        forward_loss = criterionFD(pred_next_state_measure, next_state_measure) 
+
+        if self.reg_loss_fn == 'MSE':
+            forward_loss += criterionFD(pred_next_state_measure, next_state_measure)
+        if self.reg_loss_fn == 'NLL':
+            forward_loss += NLL_loss(pred_next_state_measure, next_state_measure)
+
         if train:
             self.forward_optim.zero_grad()
             forward_loss.backward(retain_graph=True)
@@ -1593,11 +2051,11 @@ class VCSE(object):
 
 class Encoder(nn.Module):
 
-    def __init__(self, latent_dim, action_dim,
+    def __init__(self, input_dim, action_dim,
                  hidden_dim=100):
 
         super(Encoder, self).__init__()
-        self.input_dim = latent_dim
+        self.input_dim = input_dim
         self.output_dim = action_dim
         self.hidden = hidden_dim
 
@@ -1652,7 +2110,7 @@ class GIRIL(object):
                  ):
 
         self.device = device
-        self.encoder = Encoder(latent_dim=obs_dim, action_dim=action_dim,
+        self.encoder = Encoder(input_dim=obs_dim, action_dim=action_dim,
                                      hidden_dim=hidden_dim).to(device)
         self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim,
                                                       hidden_dim=hidden_dim).to(device)
@@ -1932,6 +2390,7 @@ if __name__ == '__main__':
                            obs_dim, 
                             action_dim,
                             measure_dim,
+                            reg_loss_fn=args.auxiliary_loss_fn,
                             bonus_type=args.bonus_type,
                             inverse_lr=3e-4,
                             forward_lr=3e-4)
@@ -1979,6 +2438,7 @@ if __name__ == '__main__':
                            obs_dim, 
                             action_dim,
                             measure_dim,
+                            reg_loss_fn=args.auxiliary_loss_fn,
                             bonus_type=args.bonus_type,
                             inverse_lr=3e-4,
                             forward_lr=3e-4)

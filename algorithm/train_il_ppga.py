@@ -34,12 +34,17 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str)
     parser.add_argument('--seed', type=int, default=0)
-    parser.add_argument('--intrinsic_module', type=str, default='icm')
-    parser.add_argument('--reward_save_dir', type=str, default='reward_100_random_elite/')
-    parser.add_argument('--bonus_type', type=str, default='measure_error', help='bonus type for m_reg methods',
+    parser.add_argument('--intrinsic_module', type=str, default='gail')
+    parser.add_argument('--reward_save_dir', type=str, 
+                        default='reward_8_good_and_diverse_elite_with_measures_top500/')
+    parser.add_argument('--auxiliary_loss_fn', type=str, default='MSE', choices=['MSE', 'NLL'],
+                        help='auxiliary loss function for training ACGAILs and RegGAILs when predicting measures.')
+    parser.add_argument('--bonus_type', type=str, default='measure_error', 
+                        help='bonus type for m_reg methods',
                         choices=['measure_error', 'measure_entropy', 'fitness_cond_measure_entropy', 
                                  'weighted_fitness_cond_measure_entropy'])
-    parser.add_argument('--demo_dir', type=str, default='trajs_random_elite/10episodes/')
+    parser.add_argument('--demo_dir', type=str, 
+                        default='trajs_good_and_diverse_elite_with_measures_top500/8episodes/')
     parser.add_argument('--num_demo', type=int, default=4)
     parser.add_argument("--torch_deterministic", type=lambda x: bool(strtobool(x)), default=False, nargs="?",
                         const=True,
@@ -530,6 +535,8 @@ if __name__ == '__main__':
     if 'm_reg' in cfg.intrinsic_module:
         if cfg.bonus_type != 'measure_error':
             outdir = os.path.join(f'{cfg.expdir}_{cfg.bonus_type}', str(cfg.seed))
+    if 'acgail' in cfg.intrinsic_module:
+        outdir = os.path.join(f'{cfg.expdir}_AuxLoss_{cfg.auxiliary_loss_fn}_Bonus_{cfg.bonus_type}', str(cfg.seed))
             
     cfg.outdir = outdir
     assert not os.path.exists(outdir) or cfg.load_scheduler_from_cp is not None or cfg.load_archive_from_cp is not None, \

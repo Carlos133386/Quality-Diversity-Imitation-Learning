@@ -14,7 +14,15 @@ SEED=1111
 # intrinsic_module='m_reg_icm'
 # intrinsic_module='m_cond_icm'
 # intrinsic_module='icm'
-intrinsic_module='gail'
+
+# intrinsic_module='gail'
+
+# intrinsic_module='m_acgail'
+intrinsic_module='m_cond_acgail'
+
+# auxiliary_loss_fn='MSE'
+auxiliary_loss_fn='NLL'
+
 # intrinsic_module='m_cond_gail'
 # intrinsic_module='m_reg_gail'
 # intrinsic_module='m_cond_reg_gail'
@@ -29,6 +37,7 @@ python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
                                 --intrinsic_module=${intrinsic_module} \
                                 --demo_dir=trajs_${data_str}/${num_demo}episodes/ \
                                 --reward_save_dir=reward_${num_demo}_${data_str}/ \
+                                --auxiliary_loss_fn=${auxiliary_loss_fn} \
                                 --bonus_type=${bonus_type} \
                                 --num_demo ${num_demo} \
                                 --rollout_length=128 \
