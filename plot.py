@@ -170,14 +170,14 @@ if __name__ == '__main__':
         "mCondRegICM-mEntropy": "yellow",
         "mCondRegICM-fCondmEntropy": "orange",
         "mCondRegICM-fCondmEntropy": "pink",
-        "GIRIL": 'grey',
+        "GIRIL": 'gold',
         "PPGA-trueReward": "black"
     }
-    ext_str='_GAILs'
-    # ext_str='_ICMs'
+    # ext_str='_GAILs'
+    ext_str='_ICMs'
     if ext_str == '_GAILs':
         methods = [
-                    "PPGA-trueReward",
+                    "expert",
 
                     "gail",
                     "m_cond_gail",
@@ -256,8 +256,8 @@ if __name__ == '__main__':
     make_table("Coverage", resultsfolder,labels, games, coverages_dict)
     make_table("BestReward", resultsfolder,labels, games, best_perf_dict)
     make_table("AverageReward", resultsfolder,labels, games, avg_perf_dict)
-    plot("QD-Score", resultsfolder,labels,games, qd_scores_dict, times_dict, seeds, colors, markers, ext_str)
-    plot("Coverage", resultsfolder,labels,games, coverages_dict, times_dict, seeds, colors, markers, ext_str)
+    plot("QD-Score", resultsfolder,labels,games, qd_scores_dict, times_dict, seeds, colors, markers, ext_str, with_legend=True)
+    plot("Coverage", resultsfolder,labels,games, coverages_dict, times_dict, seeds, colors, markers, ext_str, with_legend=True)
     plot("BestReward", resultsfolder,labels,games, best_perf_dict, times_dict, seeds, colors, markers, ext_str, with_legend=True)
-    plot("AverageReward", resultsfolder,labels,games, avg_perf_dict, times_dict, seeds, colors, markers, ext_str)
+    plot("AverageReward", resultsfolder,labels,games, avg_perf_dict, times_dict, seeds, colors, markers, ext_str, with_legend=True)
 

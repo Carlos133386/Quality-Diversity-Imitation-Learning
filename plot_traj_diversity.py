@@ -48,6 +48,29 @@ def visualize(num_demo=4, env_name='walker2d', topk=150):
     ax.set_title(f'{env_name}, {num_demo} demos (red), top{topk} (blue)')
     plt.savefig(file_name.replace('pt', 'png'))
     plt.close()
+    if env_name == 'ant':
+        fig, ax = plt.subplots()
+        for measure in full_occupied_measures :
+            x,y=measure[2], measure[3]
+            ax.plot(x, y, 'go')
+        for measure in topk_occupied_measures :
+            x,y=measure[2], measure[3]
+            ax.plot(x, y, 'bo')
+        for measure in demonstrator_measures:
+            x,y=measure[2], measure[3]
+            ax.plot(x, y, 'ro')
+
+        labels = ['full_occupied_measures', 'topk_occupied_measures', 'demonstrator_measures']
+        
+        handles = [
+            Line2D([0], [0], c='g', marker='o', linestyle=''),
+            Line2D([0], [0], c='b', marker='o', linestyle=''),
+            Line2D([0], [0], c='r', marker='o', linestyle='')]
+        ax.legend(handles,labels, loc="best")
+        ax.set_title(f'{env_name}, {num_demo} demos (red), top{topk} (blue)')
+        plt.savefig(file_name.replace('.pt', '_last2dims.png'))
+
+    plt.close()
 
 if __name__ == '__main__':
     # topk=100
@@ -64,7 +87,7 @@ if __name__ == '__main__':
     # topk=800
     # topk=900
     # topk=1000
-    for topk in ['HalfMax']:
-        for env_name in ['humanoid','walker2d']: # , 'ant'
-            for num_demo in [4]: #, 4, 8, 16, 32, 64
+    for topk in [500]: #'HalfMax'
+        for env_name in ['ant']: # , 
+            for num_demo in [8]: #, 4, 8, 16, 32, 64
                 visualize(num_demo, env_name, topk)
