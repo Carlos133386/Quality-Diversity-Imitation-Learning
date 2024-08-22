@@ -41,7 +41,8 @@ def parse_args():
                         help='auxiliary loss function for training ACGAILs and RegGAILs when predicting measures.')
     parser.add_argument('--bonus_type', type=str, default='measure_error', 
                         help='bonus type for m_reg methods',
-                        choices=['measure_error', 'measure_entropy', 'fitness_cond_measure_entropy', 
+                        choices=['measure_error', 'measure_error_nll', 'measure_entropy', 
+                                 'fitness_cond_measure_entropy', 
                                  'weighted_fitness_cond_measure_entropy'])
     parser.add_argument('--demo_dir', type=str, 
                         default='trajs_good_and_diverse_elite_with_measures_top500/8episodes/')
