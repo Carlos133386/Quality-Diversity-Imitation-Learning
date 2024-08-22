@@ -816,6 +816,8 @@ class mACGAIL(object):
             if self.bonus_type is not None:
                 if self.bonus_type == 'measure_error':
                     bonus = F.mse_loss(m, measure, reduction='none').mean(dim=1)
+                if self.bonus_type == 'measure_error_nll':
+                    bonus = NLL_loss(m, measure, reduction='none').mean(dim=1)
                 if self.bonus_type == 'measure_entropy':
                     bonus = self.pbe(measure).squeeze(1)
                 if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
@@ -1006,6 +1008,8 @@ class mCondACGAIL(object):
             if self.bonus_type is not None:
                 if self.bonus_type == 'measure_error':
                     bonus = F.mse_loss(m, measure, reduction='none').mean(dim=1)
+                if self.bonus_type == 'measure_error_nll':
+                    bonus = NLL_loss(m, measure, reduction='none').mean(dim=1)
                 if self.bonus_type == 'measure_entropy':
                     bonus = self.pbe(measure).squeeze(1)
                 if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
@@ -1023,10 +1027,13 @@ class mCondACGAIL(object):
             else:
                 return reward / np.sqrt(self.ret_rms.var[0] + alpha)
             
-def NLL_loss(output1, target, eps=1e-12):
+def NLL_loss(output1, target, eps=1e-12, reduction='mean'):
     output = F.softmax(output1, dim=1)
-    l = target * torch.log(output+eps)
-    loss = (-torch.sum(l)) / l.size(0)
+    l = -target * torch.log(output+eps)
+    if reduction == 'mean':
+        loss = (torch.sum(l)) / l.size(0)
+    else:
+        loss = l
     return loss 
 
 # measure regularized GAIL
@@ -1201,6 +1208,8 @@ class mRegGAIL(object):
             if self.bonus_type == 'measure_error':
                 pred_measure = self.measure_predict_model(state, action)
                 bonus = F.mse_loss(pred_measure, measure, reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_error_nll':
+                bonus = NLL_loss(pred_measure, measure, reduction='none').mean(dim=1)
             if self.bonus_type == 'measure_entropy':
                 bonus = self.pbe(measure).squeeze(1)
             if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
@@ -1390,6 +1399,8 @@ class mCondRegGAIL(object):
             if self.bonus_type == 'measure_error':
                 pred_measure = self.measure_predict_model(state, action)
                 bonus = F.mse_loss(pred_measure, measure, reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_error_nll':
+                bonus = NLL_loss(pred_measure, measure, reduction='none').mean(dim=1)
             if self.bonus_type == 'measure_entropy':
                 bonus = self.pbe(measure).squeeze(1)
             if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
@@ -1808,6 +1819,8 @@ class mRegICM(object):
             if self.bonus_type == 'measure_error':
                 pred_measure = self.measure_predict_model(state, action)
                 bonus = F.mse_loss(pred_measure, measure,reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_error_nll':
+                bonus = NLL_loss(pred_measure, measure, reduction='none').mean(dim=1)
             if self.bonus_type == 'measure_entropy':
                 bonus = self.pbe(measure).squeeze(1)
             if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
@@ -1924,6 +1937,8 @@ class mCondRegICM(object):
             if self.bonus_type == 'measure_error':
                 pred_measure = self.measure_predict_model(state, action)
                 bonus = F.mse_loss(pred_measure, measure,reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_error_nll':
+                bonus = NLL_loss(pred_measure, measure, reduction='none').mean(dim=1)
             if self.bonus_type == 'measure_entropy':
                 bonus = self.pbe(measure).squeeze(1)
             if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
