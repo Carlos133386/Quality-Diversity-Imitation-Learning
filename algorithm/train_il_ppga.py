@@ -16,7 +16,7 @@ from ribs.archives import CVTArchive, GridArchive
 from ribs.emitters import GradientAborescenceEmitter, PPGAEmitter
 from ribs.schedulers import Scheduler
 
-from RL.intrinsic_ppo import PPO
+from RL.intrinsic_ppo import IntrinsicPPO
 from utils.utilities import log, config_wandb, get_checkpoints, set_file_handler
 from models.actor_critic import Actor
 from envs.brax_custom.brax_env import make_vec_env_brax
@@ -232,7 +232,7 @@ def create_scheduler(cfg: AttrDict,
                                          seed=cfg.seed,
                                          qd_offset=qd_offset)
 
-    ppo = PPO(cfg)
+    ppo = IntrinsicPPO(cfg)
 
     # Create emitters. Each emitter needs a different seed, so that they do not
     # all do the same thing.

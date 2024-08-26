@@ -19,7 +19,8 @@ from models.vectorized import VectorizedActor
 from models.actor_critic import Actor, Critic, QDCritic
 from tqdm import tqdm 
 
-from algorithm.learn_url_reward import ICM, mCondICM, mRegICM, mCondRegICM, InverseModel, ForwardDynamicsModel, \
+from algorithm.learn_url_reward import ICM, mCondICM, mRegICM, mCondRegICM, \
+    InverseModel, ForwardDynamicsModel, GIRIL, mCondGIRIL, mRegGIRIL, mCondRegGIRIL, \
     GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL, Encoder, mACGAIL, mCondACGAIL
 from algorithm.learn_url_reward import load_sa_data 
 import pdb
@@ -49,7 +50,7 @@ def calculate_discounted_sum_torch(
     return discounted_sum
 
 
-class PPO:
+class IntrinsicPPO:
     def __init__(self, cfg):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.cfg = cfg
@@ -254,6 +255,40 @@ class PPO:
             self.reward_model = GIRIL(
                                         obs_dim,
                                         action_dim,
+                                        lr=3e-4,
+                                        )
+            print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
+            self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
+
+        if cfg.intrinsic_module == 'm_cond_giril':
+            self.reward_model = mCondGIRIL(
+                                        obs_dim,
+                                        action_dim,
+                                        measure_dim=self.cfg.num_dims,
+                                        lr=3e-4,
+                                        )
+            print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
+            self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
+
+        if cfg.intrinsic_module == 'm_reg_giril':
+            self.reward_model = mRegGIRIL(
+                                        obs_dim,
+                                        action_dim,
+                                        measure_dim=self.cfg.num_dims,
+                                        reg_loss_fn=self.cfg.auxiliary_loss_fn,
+                                        bonus_type=self.cfg.bonus_type,
+                                        lr=3e-4,
+                                        )
+            print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
+            self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
+
+        if cfg.intrinsic_module == 'm_cond_reg_giril':
+            self.reward_model = mCondRegGIRIL(
+                                        obs_dim,
+                                        action_dim,
+                                        measure_dim=self.cfg.num_dims,
+                                        reg_loss_fn=self.cfg.auxiliary_loss_fn,
+                                        bonus_type=self.cfg.bonus_type,
                                         lr=3e-4,
                                         )
             print('Loading pretrained intrinsic module: %s' % reward_model_file_name)

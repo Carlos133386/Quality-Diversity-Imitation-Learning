@@ -2151,8 +2151,8 @@ class GIRIL(object):
         
         z, mu, logvar = self.encoder(state, next_state)
          
-        reconstructed_next_state = self.forward_dynamics_model(z, state)
-        
+        reconstructed_next_state = self.forward_dynamics_model(state, z)
+
         criterionAction = nn.MSELoss()
         action_loss = criterionAction(z, action)
 
@@ -2182,6 +2182,303 @@ class GIRIL(object):
             reward = torch.mean(reward, (0, 1, 3))
         return reward
 
+class mCondGIRIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim,
+                 hidden_dim=100,
+                 device='cuda:0',
+                 lr=3e-4,
+                 ):
+
+        self.device = device
+        self.encoder = Encoder(input_dim=obs_dim+measure_dim, action_dim=action_dim,
+                                     hidden_dim=hidden_dim).to(device)
+        self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim+measure_dim, action_dim=action_dim,
+                                                      hidden_dim=hidden_dim).to(device)
+        self.lr = lr
+        
+
+        self.optim = optim.Adam(
+                                [
+                                    {'params': self.encoder.parameters()},
+                                    {'params': self.forward_dynamics_model.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+    
+    def get_vae_loss(self, recon_x, x, mean, log_var):
+        RECON = F.mse_loss(recon_x, x)
+        KLD = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
+    
+        return RECON, KLD 
+
+    def fit_batch(self, state, action, next_state, measure, next_measure,
+                  lambda_action=1.0, kld_loss_beta=1.0, train=True):
+        
+        state_measure = torch.cat([state, measure], dim=-1)
+        next_state_measure = torch.cat([next_state, next_measure], dim=-1)
+        z, mu, logvar = self.encoder(state_measure, next_state_measure)
+         
+        reconstructed_next_state_measure = self.forward_dynamics_model(state_measure, z)
+
+        criterionAction = nn.MSELoss()
+        action_loss = criterionAction(z, action)
+
+        recon_loss, kld_loss = self.get_vae_loss(reconstructed_next_state_measure, 
+                                                 next_state_measure, mu, logvar)
+        vae_loss = recon_loss + kld_loss_beta * kld_loss + lambda_action * action_loss 
+
+        if train:
+            self.optim.zero_grad()
+            vae_loss.backward(retain_graph=True)
+            self.optim.step()
+
+        # return inverse_loss, forward_loss, pred_action
+        return vae_loss, recon_loss, kld_loss_beta*kld_loss, \
+            lambda_action*action_loss, z
+
+    # Calculation of the curiosity reward
+    def calculate_intrinsic_reward(self, state, action, next_state, measure, next_measure):
+        with torch.no_grad():
+            if len(action.shape)>1:
+                action = action.squeeze(1)
+
+            state_measure = torch.cat([state, measure], dim=-1)
+            next_state_measure = torch.cat([next_state, next_measure], dim=-1)
+            pred_next_state_measure = self.forward_dynamics_model(state_measure, action)
+            processed_next_state_measure = process(next_state_measure, normalize=True, range=(-1, 1))
+            processed_pred_next_state_measure = process(pred_next_state_measure, normalize=True, range=(-1, 1))
+            reward = F.mse_loss(processed_pred_next_state_measure, processed_next_state_measure, reduction='none')
+            reward = torch.mean(reward, (0, 1, 3))
+        return reward
+
+
+class mRegGIRIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim,
+                 reg_loss_fn='MSE',
+                 bonus_type='measure_error',
+                 hidden_dim=100,
+                 device='cuda:0',
+                 lr=3e-4,
+                 ):
+
+        self.device = device
+        self.encoder = Encoder(input_dim=obs_dim, action_dim=action_dim,
+                                     hidden_dim=hidden_dim).to(device)
+        self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim,
+                                                      hidden_dim=hidden_dim).to(device)
+        self.measure_predict_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
+                                                      hidden_dim=hidden_dim, output_dim=measure_dim).to(device)
+        self.lr = lr
+
+        self.reg_loss_fn = reg_loss_fn
+        self.bonus_type = bonus_type
+        if self.bonus_type == 'measure_entropy':
+            rms = RMS(self.device)
+            knn_rms = False
+            knn_k = 500
+            knn_avg = True
+            knn_clip = 0.0
+            self.pbe = PBE(rms, knn_clip, knn_k, knn_avg, knn_rms, self.device)
+
+        if 'fitness_cond_measure_entropy' in self.bonus_type:
+            knn_k = 500
+            self.vcse = VCSE(knn_k)
+        
+
+        self.optim = optim.Adam(
+                                [
+                                    {'params': self.encoder.parameters()},
+                                    {'params': self.forward_dynamics_model.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+    
+    def get_vae_loss(self, recon_x, x, mean, log_var, pred_measure, measure):
+        RECON = F.mse_loss(recon_x, x)
+        if self.reg_loss_fn == 'MSE':
+            RECON += F.mse_loss(pred_measure, measure)
+        if self.reg_loss_fn == 'NLL':
+            RECON += NLL_loss(pred_measure, measure)
+        KLD = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
+    
+        return RECON, KLD 
+
+    def fit_batch(self, state, action, next_state, measure,
+                  lambda_action=1.0, kld_loss_beta=1.0, train=True):
+        
+        z, mu, logvar = self.encoder(state, next_state)
+         
+        reconstructed_next_state = self.forward_dynamics_model(state, z)
+        pred_measure = self.measure_predict_model(state, z)
+        
+        criterionAction = nn.MSELoss()
+        action_loss = criterionAction(z, action)
+
+        recon_loss, kld_loss = self.get_vae_loss(reconstructed_next_state, 
+                                                 next_state, mu, logvar,
+                                                 pred_measure, measure)
+        vae_loss = recon_loss + kld_loss_beta * kld_loss + lambda_action * action_loss 
+
+        if train:
+            self.optim.zero_grad()
+            vae_loss.backward(retain_graph=True)
+            self.optim.step()
+
+        # return inverse_loss, forward_loss, pred_action
+        return vae_loss, recon_loss, kld_loss_beta*kld_loss, \
+            lambda_action*action_loss, z
+
+    # Calculation of the curiosity reward
+    def calculate_intrinsic_reward(self, state, action, next_state, measure, value=None):
+        with torch.no_grad():
+            if len(action.shape)>1:
+                action = action.squeeze(1)
+
+            pred_next_state = self.forward_dynamics_model(state, action)
+            processed_next_state = process(next_state, normalize=True, range=(-1, 1))
+            processed_pred_next_state = process(pred_next_state, normalize=True, range=(-1, 1))
+            giril_reward = F.mse_loss(processed_pred_next_state, processed_next_state, reduction='none')
+            giril_reward = torch.mean(giril_reward, (0, 1, 3))
+
+            if self.bonus_type == 'measure_error':
+                pred_measure = self.measure_predict_model(state, action)
+                bonus = F.mse_loss(pred_measure, measure,reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_error_nll':
+                bonus = NLL_loss(pred_measure, measure, reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_entropy':
+                bonus = self.pbe(measure).squeeze(1)
+            if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
+                bonus = self.vcse(measure, value)[0].squeeze(1)
+            if self.bonus_type == 'weighted_fitness_cond_measure_entropy' and value is not None:
+                bonus_v, n_v,n_m, eps, state_norm, value_norm = self.vcse(measure, value)
+                bonus_m = torch.digamma(n_m+1)/measure.shape[0] + torch.log(eps*2+0.00001)
+                weight = 1/torch.abs(bonus_m)
+                bonus = weight*bonus_v
+                bonus = bonus.squeeze(1)
+                
+            reward = giril_reward + bonus
+        return reward
+
+class mCondRegGIRIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim,
+                 reg_loss_fn='MSE',
+                 bonus_type='measure_error',
+                 hidden_dim=100,
+                 device='cuda:0',
+                 lr=3e-4,
+                 ):
+
+        self.device = device
+        self.encoder = Encoder(input_dim=obs_dim+measure_dim, action_dim=action_dim,
+                                     hidden_dim=hidden_dim).to(device)
+        self.forward_dynamics_model = ForwardDynamicsModel(obs_dim=obs_dim+measure_dim, action_dim=action_dim,
+                                                      hidden_dim=hidden_dim).to(device)
+        self.measure_predict_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
+                                                      hidden_dim=hidden_dim, output_dim=measure_dim).to(device)
+        self.lr = lr
+
+        self.reg_loss_fn = reg_loss_fn
+        self.bonus_type = bonus_type
+        if self.bonus_type == 'measure_entropy':
+            rms = RMS(self.device)
+            knn_rms = False
+            knn_k = 500
+            knn_avg = True
+            knn_clip = 0.0
+            self.pbe = PBE(rms, knn_clip, knn_k, knn_avg, knn_rms, self.device)
+
+        if 'fitness_cond_measure_entropy' in self.bonus_type:
+            knn_k = 500
+            self.vcse = VCSE(knn_k)
+        
+
+        self.optim = optim.Adam(
+                                [
+                                    {'params': self.encoder.parameters()},
+                                    {'params': self.forward_dynamics_model.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+    
+    def get_vae_loss(self, recon_x, x, mean, log_var, pred_measure, measure):
+        RECON = F.mse_loss(recon_x, x)
+        if self.reg_loss_fn == 'MSE':
+            RECON += F.mse_loss(pred_measure, measure)
+        if self.reg_loss_fn == 'NLL':
+            RECON += NLL_loss(pred_measure, measure)
+        KLD = -0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp())
+    
+        return RECON, KLD 
+
+    def fit_batch(self, state, action, next_state, measure, next_measure,
+                  lambda_action=1.0, kld_loss_beta=1.0, train=True):
+        
+        state_measure = torch.cat([state, measure], dim=-1)
+        next_state_measure = torch.cat([next_state, next_measure], dim=-1)
+        z, mu, logvar = self.encoder(state_measure, next_state_measure)
+         
+        reconstructed_next_state_measure = self.forward_dynamics_model(state_measure, z)
+        pred_measure = self.measure_predict_model(state, z)
+        
+        criterionAction = nn.MSELoss()
+        action_loss = criterionAction(z, action)
+
+        recon_loss, kld_loss = self.get_vae_loss(reconstructed_next_state_measure, 
+                                                 next_state_measure, mu, logvar,
+                                                 pred_measure, measure)
+        vae_loss = recon_loss + kld_loss_beta * kld_loss + lambda_action * action_loss 
+
+        if train:
+            self.optim.zero_grad()
+            vae_loss.backward(retain_graph=True)
+            self.optim.step()
+
+        # return inverse_loss, forward_loss, pred_action
+        return vae_loss, recon_loss, kld_loss_beta*kld_loss, \
+            lambda_action*action_loss, z
+
+    # Calculation of the curiosity reward
+    def calculate_intrinsic_reward(self, state, action, next_state, measure, next_measure, value=None):
+        with torch.no_grad():
+            if len(action.shape)>1:
+                action = action.squeeze(1)
+
+            state_measure = torch.cat([state, measure], dim=-1)
+            next_state_measure = torch.cat([next_state, next_measure], dim=-1)
+            pred_next_state_measure = self.forward_dynamics_model(state_measure, action)
+            processed_next_state_measure = process(next_state_measure, normalize=True, range=(-1, 1))
+            processed_pred_next_state_measure = process(pred_next_state_measure, normalize=True, range=(-1, 1))
+            giril_reward = F.mse_loss(processed_pred_next_state_measure, processed_next_state_measure, reduction='none')
+            giril_reward = torch.mean(giril_reward, (0, 1, 3))
+
+            if self.bonus_type == 'measure_error':
+                pred_measure = self.measure_predict_model(state, action)
+                bonus = F.mse_loss(pred_measure, measure,reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_error_nll':
+                bonus = NLL_loss(pred_measure, measure, reduction='none').mean(dim=1)
+            if self.bonus_type == 'measure_entropy':
+                bonus = self.pbe(measure).squeeze(1)
+            if self.bonus_type == 'fitness_cond_measure_entropy' and value is not None:
+                bonus = self.vcse(measure, value)[0].squeeze(1)
+            if self.bonus_type == 'weighted_fitness_cond_measure_entropy' and value is not None:
+                bonus_v, n_v,n_m, eps, state_norm, value_norm = self.vcse(measure, value)
+                bonus_m = torch.digamma(n_m+1)/measure.shape[0] + torch.log(eps*2+0.00001)
+                weight = 1/torch.abs(bonus_m)
+                bonus = weight*bonus_v
+                bonus = bonus.squeeze(1)
+                
+            reward = giril_reward + bonus
+        return reward
+
 def parse_args():
     parser = argparse.ArgumentParser()
     # PPO params
@@ -2192,7 +2489,10 @@ def parse_args():
     parser.add_argument('--demo_dir', type=str, default='trajs_random_elite/100episodes/')
     parser.add_argument('--num_demo', type=int, default=100)
     parser.add_argument('--reward_save_dir', type=str, default='reward_100_random_elite/')
-    parser.add_argument('--bonus_type', type=str, default='measure_error', help='bonus type for m_reg methods',
+    parser.add_argument('--auxiliary_loss_fn', type=str, default='MSE', choices=['MSE', 'NLL'],
+                        help='auxiliary loss function predicting measures.')
+    parser.add_argument('--bonus_type', type=str, default='measure_error', 
+                        help='bonus type for m_reg methods',
                         choices=['measure_error', 'measure_entropy'])
     parser.add_argument('--intrinsic_epoch', type=int, default=1000)
     parser.add_argument('--intrinsic_save_interval', type=int, default=50)
@@ -2308,7 +2608,11 @@ if __name__ == '__main__':
     #     reward_model_file_name = f'{args.reward_save_dir}/reward_model_{args.intrinsic_module}_{args.reward_type}_{args.env_name}.pt'
 
     short_env_name = args.env_name.replace('-v2', '')
-    measure_dim=2 if not 'ant' in short_env_name else 4
+    measure_dim = 2
+    if 'ant' in short_env_name:
+        measure_dim = 4
+    if 'hopper' in short_env_name:
+        measure_dim = 1
 
     if args.intrinsic_module == 'icm':
         reward_model = ICM(
@@ -2524,6 +2828,180 @@ if __name__ == '__main__':
                                            )
 
                 rewards = reward_model.calculate_intrinsic_reward(state, action, next_state)[0]
+                e_vae_loss += vae_loss.item()
+                e_recon_loss += recon_loss.item()
+                e_kld_loss += kld_loss.item()
+                e_action_loss += action_loss.item()
+                e_reward += torch.mean(rewards).item()
+            
+            e_vae_loss /= (i+1)
+            e_recon_loss /= (i+1)
+            e_kld_loss /= (i+1)
+            e_action_loss /= (i+1)
+            e_reward /= (i+1)
+            if (e+1) % 50 == 0:
+                print('Epoch:', e+1, '%s-%s Loss - VAE loss: %s, Recon loss: %s, KLD loss: %s and Action loss: %s,  Rewards: %s' \
+                    % ( args.intrinsic_module, short_env_name, \
+                        e_vae_loss, e_recon_loss, e_kld_loss, e_action_loss, e_reward))
+            
+                result_str = f'{e+1},{e_vae_loss},{e_recon_loss},{e_kld_loss},{e_action_loss},{e_reward}\n'
+                with open(intrinsic_log_file_name, 'a') as f:
+                    f.write(result_str)
+            if (e+1) % args.intrinsic_save_interval == 0:
+                print('Saving the pretrained %s epochs %s as %s' % (e+1, args.intrinsic_module, \
+                                                                    reward_model_file_name))
+                torch.save([reward_model.encoder, reward_model.forward_dynamics_model], reward_model_file_name)             
+
+    if args.intrinsic_module == 'm_cond_giril':
+        reward_model = mCondGIRIL(
+                           obs_dim, 
+                            action_dim,
+                            measure_dim,
+                            lr=3e-4)
+        
+        with open(intrinsic_log_file_name, 'w') as f:
+            head = 'Epoch,VAE_loss,Recon_loss,KLD_loss,Action_loss,IntrinsicReward\n'
+            f.write(head)
+            
+        dataset, dataloader = load_sa_data(args, return_next_state=True)
+        for e in range(args.intrinsic_epoch):
+            e_vae_loss = 0
+            e_recon_loss = 0
+            e_kld_loss = 0
+            e_action_loss = 0
+            e_reward = 0
+            for i, (state, action, next_state, measure, next_measure) in enumerate(dataloader):
+                state = state.to(device)
+                action = action.to(device)
+                next_state = next_state.to(device)
+                measure = measure.to(device)
+                next_measure = next_measure.to(device)
+                vae_loss, recon_loss, kld_loss, action_loss, action_logit = \
+                    reward_model.fit_batch(state, action, next_state, measure, next_measure,
+                                           lambda_action=0.01,
+                                           kld_loss_beta=1.0
+                                           )
+
+                rewards = reward_model.calculate_intrinsic_reward(state, action, next_state, 
+                                                                  measure, next_measure)[0]
+                e_vae_loss += vae_loss.item()
+                e_recon_loss += recon_loss.item()
+                e_kld_loss += kld_loss.item()
+                e_action_loss += action_loss.item()
+                e_reward += torch.mean(rewards).item()
+            
+            e_vae_loss /= (i+1)
+            e_recon_loss /= (i+1)
+            e_kld_loss /= (i+1)
+            e_action_loss /= (i+1)
+            e_reward /= (i+1)
+            if (e+1) % 50 == 0:
+                print('Epoch:', e+1, '%s-%s Loss - VAE loss: %s, Recon loss: %s, KLD loss: %s and Action loss: %s,  Rewards: %s' \
+                    % ( args.intrinsic_module, short_env_name, \
+                        e_vae_loss, e_recon_loss, e_kld_loss, e_action_loss, e_reward))
+            
+                result_str = f'{e+1},{e_vae_loss},{e_recon_loss},{e_kld_loss},{e_action_loss},{e_reward}\n'
+                with open(intrinsic_log_file_name, 'a') as f:
+                    f.write(result_str)
+            if (e+1) % args.intrinsic_save_interval == 0:
+                print('Saving the pretrained %s epochs %s as %s' % (e+1, args.intrinsic_module, \
+                                                                    reward_model_file_name))
+                torch.save([reward_model.encoder, reward_model.forward_dynamics_model], reward_model_file_name)             
+
+
+    if args.intrinsic_module == 'm_reg_giril':
+        reward_model = mRegGIRIL(
+                            obs_dim, 
+                            action_dim,
+                            measure_dim,
+                            reg_loss_fn=args.auxiliary_loss_fn,
+                            bonus_type=args.bonus_type,
+                            lr=3e-4)
+        
+        with open(intrinsic_log_file_name, 'w') as f:
+            head = 'Epoch,VAE_loss,Recon_loss,KLD_loss,Action_loss,IntrinsicReward\n'
+            f.write(head)
+            
+        dataset, dataloader = load_sa_data(args, return_next_state=True)
+        for e in range(args.intrinsic_epoch):
+            e_vae_loss = 0
+            e_recon_loss = 0
+            e_kld_loss = 0
+            e_action_loss = 0
+            e_reward = 0
+            for i, (state, action, next_state, measure, next_measure) in enumerate(dataloader):
+                state = state.to(device)
+                action = action.to(device)
+                next_state = next_state.to(device)
+                measure = measure.to(device)
+
+                vae_loss, recon_loss, kld_loss, action_loss, action_logit = \
+                    reward_model.fit_batch(state, action, next_state, measure, 
+                                           lambda_action=0.01,
+                                           kld_loss_beta=1.0
+                                           )
+
+                rewards = reward_model.calculate_intrinsic_reward(state, action, next_state, measure)[0]
+                e_vae_loss += vae_loss.item()
+                e_recon_loss += recon_loss.item()
+                e_kld_loss += kld_loss.item()
+                e_action_loss += action_loss.item()
+                e_reward += torch.mean(rewards).item()
+            
+            e_vae_loss /= (i+1)
+            e_recon_loss /= (i+1)
+            e_kld_loss /= (i+1)
+            e_action_loss /= (i+1)
+            e_reward /= (i+1)
+            if (e+1) % 50 == 0:
+                print('Epoch:', e+1, '%s-%s Loss - VAE loss: %s, Recon loss: %s, KLD loss: %s and Action loss: %s,  Rewards: %s' \
+                    % ( args.intrinsic_module, short_env_name, \
+                        e_vae_loss, e_recon_loss, e_kld_loss, e_action_loss, e_reward))
+            
+                result_str = f'{e+1},{e_vae_loss},{e_recon_loss},{e_kld_loss},{e_action_loss},{e_reward}\n'
+                with open(intrinsic_log_file_name, 'a') as f:
+                    f.write(result_str)
+            if (e+1) % args.intrinsic_save_interval == 0:
+                print('Saving the pretrained %s epochs %s as %s' % (e+1, args.intrinsic_module, \
+                                                                    reward_model_file_name))
+                torch.save([reward_model.encoder, reward_model.forward_dynamics_model], reward_model_file_name)             
+
+
+    if args.intrinsic_module == 'm_cond_reg_giril':
+        reward_model = mCondRegGIRIL(
+                            obs_dim, 
+                            action_dim,
+                            measure_dim,
+                            reg_loss_fn=args.auxiliary_loss_fn,
+                            bonus_type=args.bonus_type,
+                            lr=3e-4)
+        
+        with open(intrinsic_log_file_name, 'w') as f:
+            head = 'Epoch,VAE_loss,Recon_loss,KLD_loss,Action_loss,IntrinsicReward\n'
+            f.write(head)
+            
+        dataset, dataloader = load_sa_data(args, return_next_state=True)
+        for e in range(args.intrinsic_epoch):
+            e_vae_loss = 0
+            e_recon_loss = 0
+            e_kld_loss = 0
+            e_action_loss = 0
+            e_reward = 0
+            for i, (state, action, next_state, measure, next_measure) in enumerate(dataloader):
+                state = state.to(device)
+                action = action.to(device)
+                next_state = next_state.to(device)
+                measure = measure.to(device)
+                next_measure = next_measure.to(device)
+
+                vae_loss, recon_loss, kld_loss, action_loss, action_logit = \
+                    reward_model.fit_batch(state, action, next_state, measure, next_measure,
+                                           lambda_action=0.01,
+                                           kld_loss_beta=1.0
+                                           )
+
+                rewards = reward_model.calculate_intrinsic_reward(state, action, next_state, 
+                                                                  measure, next_measure)[0]
                 e_vae_loss += vae_loss.item()
                 e_recon_loss += recon_loss.item()
                 e_kld_loss += kld_loss.item()
