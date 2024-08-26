@@ -575,11 +575,12 @@ class IntrinsicPPO:
                             else:
                                 intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                     self.obs[step], action, self.measures[step]).squeeze()
-                        elif self.intrinsic_module in ['m_cond_icm', 'm_cond_reg_icm']:
+                        elif self.intrinsic_module in ['m_cond_icm', 'm_cond_reg_icm', 
+                                                       'm_cond_giril', 'm_cond_reg_giril']:
                             intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                 self.obs[step], action, self.next_obs,
                                                 self.measures[step], self.next_measure)
-                        elif self.intrinsic_module == 'm_reg_icm':
+                        elif self.intrinsic_module in ['m_reg_icm', 'm_reg_giril']:
                             if 'fitness_cond' in self.cfg.bonus_type:
                                 intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                     self.obs[step], action, self.next_obs,
