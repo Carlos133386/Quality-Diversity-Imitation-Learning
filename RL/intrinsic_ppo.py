@@ -259,6 +259,9 @@ class PPO:
             print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
             self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
 
+        if cfg.intrinsic_module == 'zero':
+            self.reward_model = None
+
 
     @property
     def agents(self):
@@ -524,7 +527,9 @@ class PPO:
                     # Calcuate_intrinsic_rewards here for imitation learning
                
                     with torch.no_grad():
-                        if self.intrinsic_module == 'gail' or self.intrinsic_module=='vail':
+                        if self.intrinsic_module == 'zero':
+                            intrinsic_reward = torch.zeros((self.num_envs)).to(self.device)
+                        elif self.intrinsic_module == 'gail' or self.intrinsic_module=='vail':
                             intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                 self.obs[step], action).squeeze()
                         elif self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_reg_gail', 
@@ -554,6 +559,7 @@ class PPO:
                     
                     self.rewards[step] = torch.nan_to_num(intrinsic_reward, nan=0.0, posinf=10.0, neginf=-10.0) 
                     
+
 
                     if not calculate_dqd_gradients and not move_mean_agent:
                         if dones.any():

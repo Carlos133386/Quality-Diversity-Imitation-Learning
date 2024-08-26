@@ -301,13 +301,17 @@ def train_ppga(cfg: AttrDict, vec_env):
     if not heatmap_dir.is_dir():
         heatmap_dir.mkdir()
 
+    
     # path to summary file
     summary_filename = os.path.join(str(exp_dir), 'summary.csv')
-    if os.path.exists(summary_filename):
-        os.remove(summary_filename)
-    with open(summary_filename, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
+    
+    if not cfg.load_scheduler_from_cp:
+        if os.path.exists(summary_filename):
+            # os.remove(summary_filename)
+            os.rename(summary_filename, summary_filename.replace('.csv', '_old.csv'))
+        with open(summary_filename, 'w') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

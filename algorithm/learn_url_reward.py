@@ -489,7 +489,7 @@ class GAIL(object):
             d = self.discriminator(torch.cat([state, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
@@ -635,7 +635,7 @@ class mCondGAIL(object):
             d = self.discriminator(torch.cat([state, measure, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
@@ -806,7 +806,7 @@ class mACGAIL(object):
             d, m = self.discriminator(torch.cat([state, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 gail_reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
@@ -998,7 +998,7 @@ class mCondACGAIL(object):
             d, m = self.discriminator(torch.cat([state, measure, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 gail_reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
@@ -1198,7 +1198,7 @@ class mRegGAIL(object):
             d = self.discriminator(torch.cat([state, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 gail_reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
@@ -1389,7 +1389,7 @@ class mCondRegGAIL(object):
             d = self.discriminator(torch.cat([state, measure, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 gail_reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
@@ -1576,7 +1576,7 @@ class VAIL(object):
             d, mu, sigma = self.discriminator(torch.cat([state, action], dim=1))
             s = torch.sigmoid(d)  
             # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
-            #reward = torch.log(s + alpha) - torch.log(1 - s + alpha) # only work on halfcheetah env
+            
             if reward_type == 'logd':
                 reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':

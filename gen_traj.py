@@ -43,13 +43,15 @@ def config_env(env_name='ant', seed=1111):
         'humanoid': (227,),
         'ant': (87,),
         'halfcheetah': (18,),
-        'walker2d': (17,)
+        'walker2d': (17,),
+        'hopper': (11,),
     }
     action_shapes = {
         'humanoid': (17,),
         'ant': (8,),
         'halfcheetah': (6,),
-        'walker2d': (6,)
+        'walker2d': (6,),
+        'hopper': (3,),
     }
 
     # define the final config objects
@@ -73,8 +75,8 @@ def config_env(env_name='ant', seed=1111):
 
     # now lets load in a saved archive dataframe and scheduler
     # change this to be your own checkpoint path
-    archive_path = f'experiments_1_best_elite/IL_ppga_{env_name}_expert/1111/checkpoints/cp_00002000/archive_df_00002000.pkl'
-    scheduler_path = f'experiments_1_best_elite/IL_ppga_{env_name}_expert/1111/checkpoints/cp_00002000/scheduler_00002000.pkl'
+    archive_path = f'experiments_experts/IL_ppga_{env_name}_expert/1111/checkpoints/cp_00002000/archive_df_00002000.pkl'
+    scheduler_path = f'experiments_experts/IL_ppga_{env_name}_expert/1111/checkpoints/cp_00002000/scheduler_00002000.pkl'
     with open(archive_path, 'rb') as f:
         archive_df = pickle.load(f)
     with open(scheduler_path, 'rb') as f:
@@ -103,7 +105,7 @@ def euclidean_dist(point, centroids):
     dist = np.sqrt(np.sum((point - centroids) ** 2, axis=1))
     return dist
 
-def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
+def sample_top_k_diverse_elites(archive, topk=100, num_elite=4):
     """Randomly samples elites from the archive.
 
     Currently, this sampling is done uniformly at random. Furthermore, each
@@ -118,7 +120,7 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
 
     Or the fields may be accessed by name::
 
-        elite = sample_top_k_diverse_elites(archive, topk=100, num_demo=4) 
+        elite = sample_top_k_diverse_elites(archive, topk=100, num_elite=4) 
         elite.solution_batch
         elite.objective_batch
         ...
@@ -152,7 +154,7 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
     centroids = [initial_centroid]                          # Put the data point into a list with centroid locations
     
     centroid_indices = [initial_centroid_idx]
-    num_centorids = num_demo
+    num_centorids = num_elite
     for i in range(1, num_centorids):
         distances = []
 
@@ -173,7 +175,7 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
     selected_indices = topk_indices[centroid_indices]
     
     elites = []
-    for i in range(num_demo):
+    for i in range(num_elite):
         selected_indices_ = np.asarray([selected_indices[i]])
         elite =  EliteBatch(
                         readonly(archive._solution_arr[selected_indices_]),
@@ -185,7 +187,7 @@ def sample_top_k_diverse_elites(archive, topk=100, num_demo=4):
         elites.append(elite)
     return elites, selected_indices, archive._measures_arr, archive._measures_arr[topk_indices]
 
-def sample_top_HalfMax_diverse_elites(archive, num_demo=4):
+def sample_top_HalfMax_diverse_elites(archive, num_elite=4):
     """Randomly samples elites from the archive.
 
     Currently, this sampling is done uniformly at random. Furthermore, each
@@ -200,7 +202,7 @@ def sample_top_HalfMax_diverse_elites(archive, num_demo=4):
 
     Or the fields may be accessed by name::
 
-        elite = sample_top_k_diverse_elites(archive, topk=100, num_demo=4) 
+        elite = sample_top_k_diverse_elites(archive, topk=100, num_elite=4) 
         elite.solution_batch
         elite.objective_batch
         ...
@@ -234,7 +236,7 @@ def sample_top_HalfMax_diverse_elites(archive, num_demo=4):
     centroids = [initial_centroid]                          # Put the data point into a list with centroid locations
     
     centroid_indices = [initial_centroid_idx]
-    num_centorids = num_demo
+    num_centorids = num_elite
     for i in range(1, num_centorids):
         distances = []
 
@@ -255,7 +257,7 @@ def sample_top_HalfMax_diverse_elites(archive, num_demo=4):
     selected_indices = topk_indices[centroid_indices]
     
     elites = []
-    for i in range(num_demo):
+    for i in range(num_elite):
         selected_indices_ = np.asarray([selected_indices[i]])
         elite =  EliteBatch(
                         readonly(archive._solution_arr[selected_indices_]),
@@ -350,7 +352,7 @@ def gen_1_traj(env, agent, actor_cfg, env_cfg, render=False, deterministic=True)
     return eps_states, eps_actions, eps_rewards, eps_measures, eps_return, eps_length
     
 
-def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant', 
+def gen_multi_trajs(agent_type='random', num_elite=4, num_demo_per_elite=1, env_name='ant', 
                     topk=500):
     print(env_name, '='*100)
     env, scheduler, actor_cfg, env_cfg = config_env(env_name)
@@ -360,7 +362,11 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
         traj_root += f'_top{topk}'
     os.makedirs(traj_root,exist_ok=True)
 
-    os.makedirs(f'{traj_root}/{num_demo}episodes', exist_ok=True)
+    if num_demo_per_elite > 1:
+        demo_dir = f'{traj_root}/{num_elite}x{num_demo_per_elite}episodes'
+    else:
+        demo_dir = f'{traj_root}/{num_elite}episodes'
+    os.makedirs(demo_dir, exist_ok=True)
 
     lengths = []
     rewards = []
@@ -375,11 +381,11 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
     if agent_type == 'good_and_diverse':
         if topk != 'HalfMax':
             elites, selected_indices, full_occupied_measures, topk_occupied_measures = \
-                sample_top_k_diverse_elites(scheduler.archive, topk=topk, num_demo=num_demo)
+                sample_top_k_diverse_elites(scheduler.archive, topk=topk, num_elite=num_elite)
         else:
             elites, selected_indices, full_occupied_measures, topk_occupied_measures = \
-                sample_top_HalfMax_diverse_elites(scheduler.archive, num_demo=num_demo)
-    for i in range(num_demo):
+                sample_top_HalfMax_diverse_elites(scheduler.archive, num_elite=num_elite)
+    for i in range(num_elite):
         if agent_type == 'best':
             agent, demonstrator_measure = get_best_elite(scheduler, actor_cfg)
         if agent_type == 'random':
@@ -388,24 +394,25 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
             elite = elites[i]
             agent, demonstrator_measure = get_good_and_diverse_elite(elite, actor_cfg)
         
-        eps_states, eps_actions, eps_rewards, eps_measures, eps_return, eps_length = \
-            gen_1_traj(env, agent, actor_cfg, env_cfg)
-        states.append(eps_states)
-        actions.append(eps_actions)
-        rewards.append(eps_rewards)
-        measures.append(eps_measures)
-        returns.append(eps_return)
-        lengths.append(eps_length)
-        demonstrator_measures.append(demonstrator_measure)
-        demonstrator_returns.append(elite.objective_batch[0])
-        i +=1
-        eps_measures_avg = eps_measures[:eps_length, ].sum(axis=0) / eps_length
-        # print(env_name, 'Episode', i, '==========================')
-        # print(i, 'eps_return', eps_return)
-        # print(i, 'eps_length', eps_length)
-        # print(i, 'demonstrator_measures', demonstrator_measure)
-        # print(i, 'eps_measures avg', eps_measures_avg)
-        
+        for j in range(num_demo_per_elite):
+            eps_states, eps_actions, eps_rewards, eps_measures, eps_return, eps_length = \
+                gen_1_traj(env, agent, actor_cfg, env_cfg)
+            states.append(eps_states)
+            actions.append(eps_actions)
+            rewards.append(eps_rewards)
+            measures.append(eps_measures)
+            returns.append(eps_return)
+            lengths.append(eps_length)
+            demonstrator_measures.append(demonstrator_measure)
+            demonstrator_returns.append(elite.objective_batch[0])
+            i +=1
+            eps_measures_avg = eps_measures[:eps_length, ].sum(axis=0) / eps_length
+            # print(env_name, 'Episode', i, '==========================')
+            # print(i,j, 'eps_return', eps_return)
+            # print(i,j, 'eps_length', eps_length)
+            # print(i,j, 'demonstrator_measures', demonstrator_measure)
+            # print(i,j, 'eps_measures avg', eps_measures_avg)
+            
    
     states = np.concatenate(states, axis=0)
     actions = np.concatenate(actions, axis=0)
@@ -442,28 +449,23 @@ def gen_multi_trajs(agent_type='random', num_demo=10, env_name='ant',
         traj['topk_occupied_measures'] = topk_occupied_measures
     
     
-    file_name = f'{traj_root}/{num_demo}episodes/trajs_ppga_{env_name}.pt'
+    file_name = f'{demo_dir}/trajs_ppga_{env_name}.pt'
     pickle.dump(traj, open(file_name, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
 
-# topk=150
-# topk=200
-# topk=250
-# topk=300
-# topk=350
-# topk=400
-# topk=450
-# topk=500
-# topk=600
-# topk=700
-# topk=800
-# topk=900
-# topk=1000
-topk='HalfMax'
-for num_demo in [4, 8, 16, 32, 64]:
-    for env_name in ['ant', 'walker2d', 'humanoid']: # 
-        # gen_multi_trajs(agent_type='best', num_demo=num_demo, env_name=env_name)
-        # gen_multi_trajs(agent_type='random', num_demo=num_demo, env_name=env_name)
-        gen_multi_trajs(agent_type='good_and_diverse', num_demo=num_demo, env_name=env_name, topk=topk)
+topk=500
+# topk='HalfMax'
+for num_elite in [4]:
+    for env_name in ['halfcheetah']: # , 'walker2d', 'humanoid', 'ant'
+        # gen_multi_trajs(agent_type='best', num_elite=num_elite, env_name=env_name)
+        # gen_multi_trajs(agent_type='random', num_elite=num_elite, env_name=env_name)
+        if env_name == 'ant':
+            num_demo_per_elite=8
+        else:
+            num_demo_per_elite=1
+        gen_multi_trajs(agent_type='good_and_diverse', 
+                        num_elite=num_elite, 
+                        num_demo_per_elite=num_demo_per_elite,
+                        env_name=env_name, topk=topk)
 
 
 

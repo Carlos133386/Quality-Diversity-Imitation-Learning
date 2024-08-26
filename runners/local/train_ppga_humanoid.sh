@@ -38,6 +38,6 @@ python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                 --archive_lr=0.1 \
                                 --threshold_min=200 \
                                 --grid_size=$GRID_SIZE \
-                                --expdir=./experiments/paper_ppga_"$ENV_NAME"_expert \
+                                --expdir=./experiments_experts/IL_ppga_"$ENV_NAME"_expert \
                                 --wandb_project PPGA_${ENV_NAME}
                                  

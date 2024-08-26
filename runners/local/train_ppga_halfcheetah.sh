@@ -7,6 +7,13 @@ SEED=1111
 
 RUN_NAME="paper_ppga_"$ENV_NAME"_seed_"$SEED
 echo $RUN_NAME
+GROUP_NAME=IL_ppga_"$ENV_NAME"_expert
+
+cp_dir=./experiments_experts/$GROUP_NAME/${SEED}/checkpoints
+cp_iter=00001090
+scheduler_cp=${cp_dir}/cp_${cp_iter}/scheduler_${cp_iter}.pkl
+archive_cp=${cp_dir}/cp_${cp_iter}/archive_df_${cp_iter}.pkl
+
 python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                 --rollout_length=128 \
                                 --use_wandb=False \
@@ -33,7 +40,10 @@ python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                 --calc_gradient_iters=10 \
                                 --move_mean_iters=10 \
                                 --archive_lr=0.5 \
-                                --threshold_min=200 \
+                                --threshold_min=-200 \
                                 --grid_size=$GRID_SIZE \
-                                --expdir=./experiments/paper_ppga_"$ENV_NAME"_expert \
-                                --wandb_project PPGA_${ENV_NAME}
+                                --expdir=./experiments_experts/${GROUP_NAME} \
+                                --wandb_project PPGA_${ENV_NAME} \
+                                --load_scheduler_from_cp=${scheduler_cp} \
+                                --load_archive_from_cp=${archive_cp} \
+                                # no elite in archive when threshold_min=200

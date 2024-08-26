@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-ENV_NAME="ant"
+ENV_NAME="hopper"
 GRID_SIZE=10  # number of cells per archive dimension
 SEED=1111
 
@@ -12,7 +12,7 @@ python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --use_wandb=False \
                                      --seed=$SEED \
                                      --wandb_group=paper \
-                                     --num_dims=4 \
+                                     --num_dims=1 \
                                      --num_minibatches=8 \
                                      --update_epochs=4 \
                                      --normalize_obs=True \
@@ -22,6 +22,7 @@ python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --env_batch_size=3000 \
                                      --learning_rate=0.001 \
                                      --vf_coef=2 \
+                                     --target_kl=0.008 \
                                      --max_grad_norm=1 \
                                      --torch_deterministic=False \
                                      --total_iterations=2000 \
@@ -30,7 +31,7 @@ python -m algorithm.train_ppga --env_name=$ENV_NAME \
                                      --move_mean_iters=10 \
                                      --archive_lr=0.1 \
                                      --restart_rule=no_improvement \
-                                     --sigma0=3.0 \
+                                     --sigma0=1.0 \
                                      --threshold_min=-500 \
                                      --grid_size=$GRID_SIZE \
                                      --expdir=./experiments_experts/IL_ppga_"$ENV_NAME"_expert \

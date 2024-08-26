@@ -288,11 +288,14 @@ def train_ppga(cfg: AttrDict, vec_env):
 
     # path to summary file
     summary_filename = os.path.join(str(exp_dir), 'summary.csv')
-    if os.path.exists(summary_filename):
-        os.remove(summary_filename)
-    with open(summary_filename, 'w') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
+    
+    if not cfg.load_scheduler_from_cp:
+        if os.path.exists(summary_filename):
+            # os.remove(summary_filename)
+            os.rename(summary_filename, summary_filename.replace('.csv', '_old.csv'))
+        with open(summary_filename, 'w') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Iteration', 'QD-Score', 'Coverage', 'Maximum', 'Average'])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -324,8 +327,8 @@ def train_ppga(cfg: AttrDict, vec_env):
     ppo = scheduler.emitters[0].ppo
 
     # save the initial heatmap
-    if cfg.num_dims <= 2:
-        save_heatmap(result_archive, os.path.join(str(heatmap_dir), f'heatmap_{0:05d}.png'))
+    # if cfg.num_dims <= 2:
+    #     save_heatmap(result_archive, os.path.join(str(heatmap_dir), f'heatmap_{0:05d}.png'))
 
     log_freq = 1
     log_arch_freq = cfg.log_arch_freq
@@ -359,7 +362,7 @@ def train_ppga(cfg: AttrDict, vec_env):
                                                        negative_measure_gradients=False)
 
         # for plotting purposes
-        emitter_loc = (measures[0][0], measures[0][1])
+        # emitter_loc = (measures[0][0], measures[0][1])
         best = max(best, max(objs))
 
         # return the gradients to the scheduler. Will be used for the next step
@@ -435,9 +438,9 @@ def train_ppga(cfg: AttrDict, vec_env):
         # logging
         log.debug(f'{itr=}, {itrs=}, Progress: {(100.0 * (itr / itrs)):.2f}%')
 
-        if cfg.num_dims <= 2:
-            save_heatmap(result_archive, os.path.join(str(heatmap_dir), f'heatmap_{itr:05d}.png'),
-                         emitter_loc=emitter_loc, forces=None)
+        # if cfg.num_dims <= 2:
+        #     save_heatmap(result_archive, os.path.join(str(heatmap_dir), f'heatmap_{itr:05d}.png'),
+        #                  emitter_loc=emitter_loc, forces=None)
 
         # Save the archive at the given frequency.
         # Always save on the final iteration.

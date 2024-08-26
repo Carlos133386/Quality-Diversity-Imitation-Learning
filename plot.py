@@ -6,7 +6,7 @@ plt.style.use('ggplot')
 import matplotlib
 matplotlib.use('pdf')
 
-def read_data(summary_file, subsample=40):
+def read_data(summary_file, subsample=4):
     df = pd.read_csv(summary_file)
     iterations = np.array(df["Iteration"])[0::subsample]*subsample
     QD_Score = np.array(df["QD-Score"])[0::subsample]
@@ -101,7 +101,7 @@ def plot(metric, resultsfolder,labels, games, scores, times, seeds, colors, mark
         # fig.show()
         plt.close()
 
-def make_table(metric, resultsfolder,labels, games,scores,subsample=40):
+def make_table(metric, resultsfolder,labels, games,scores,subsample=4):
     stop_eval = int(2000/subsample) # use smaller to check ongoing runs
     # table
     writefile = open(f"{resultsfolder}/table_{metric}.txt", "w")
@@ -130,120 +130,157 @@ if __name__ == '__main__':
     markers = {
         "GAIL": ",",
         "VAIL": ",",
+        "mACGAIL_NLL_FCME": ",",
+        "mCondACGAIL_NLL_FCME": ",",
+        "mACGAIL_MSE_FCME": ",",
+        "mCondACGAIL_MSE_FCME": ",",
+        "mACGAIL_MSE_mCuriosity": ",",
+        "mCondACGAIL_MSE_mCuriosity": ",",
         "mCondGAIL": ",",
         "mRegGAIL-mCuriosity": ",",
-        "mRegGAIL-mEntropy": ",",
-        "mRegGAIL-fCondmEntropy": ",",
-        "mRegGAIL-WfCondmEntropy": ",",
+        "mRegGAIL-mEntropy": "*",
+        "mRegGAIL-FCME": ",",
+        "mRegGAIL-WFCME": ",",
         "mCondRegGAIL-mCuriosity": ",",
         "mCondRegGAIL-mEntropy": ",",
-        "mCondRegGAIL-fCondmEntropy": ",",
+        "mCondRegGAIL-FCME": ",",
         "ICM": ",",
         "mCondICM": ",",
         "mRegICM-mCuriosity": ",",
         "mRegICM-mEntropy": ',',
-        "mRegICM-fCondmEntropy": ',',
-        "mRegICM-WfCondmEntropy": ',',
+        "mRegICM-FCME": ',',
+        "mRegICM-WFCME": ',',
         "mCondRegICM-mCuriosity": ",",
         "mCondRegICM-mEntropy": ',',
-        "mCondRegICM-fCondmEntropy": ',',
+        "mCondRegICM-FCME": ',',
         "GIRIL": ',',
         "PPGA-trueReward": '*'
     }
     colors = {
         "GAIL": "tab:brown",
         "VAIL": "tab:blue",
+        "mACGAIL_NLL_FCME": "green",
+        "mCondACGAIL_NLL_FCME": "red",
+        "mACGAIL_MSE_FCME": "lightgreen",
+        "mCondACGAIL_MSE_FCME": "pink",
+        "mACGAIL_MSE_mCuriosity": "darkblue",
+        "mCondACGAIL_MSE_mCuriosity": "orange",
         "mCondGAIL": "cyan",
-        "mRegGAIL-mCuriosity": "lightgreen",
-        "mRegGAIL-mEntropy": "yellow",
-        "mRegGAIL-fCondmEntropy": "orange",
-        "mRegGAIL-WfCondmEntropy": "pink",
+        "mRegGAIL-mCuriosity": "purple",
+        "mRegGAIL-mEntropy": "gold",
+        "mRegGAIL-FCME": "yellow",
+        "mRegGAIL-WFCME": "pink",
         "mCondRegGAIL-mCuriosity": "tab:green",
         "mCondRegGAIL-mEntropy": "tab:red",
-        "mCondRegGAIL-fCondmEntropy": "darkblue",
+        "mCondRegGAIL-FCME": "darkblue",
         "ICM": "gray",
         "mCondICM": "tab:purple",
         "mRegICM-mCuriosity": "tab:green",
         "mRegICM-mEntropy": "tab:red",
-        "mRegICM-fCondmEntropy": "darkblue",
+        "mRegICM-FCME": "darkblue",
         "mCondRegICM-mCuriosity": "lightgreen",
         "mCondRegICM-mEntropy": "yellow",
-        "mCondRegICM-fCondmEntropy": "orange",
-        "mCondRegICM-fCondmEntropy": "pink",
+        "mCondRegICM-FCME": "orange",
+        "mCondRegICM-FCME": "pink",
         "GIRIL": 'gold',
         "PPGA-trueReward": "black"
     }
-    # ext_str='_GAILs'
-    ext_str='_ICMs'
+    ext_str='_GAILs'
+    # ext_str='_ICMs'
     if ext_str == '_GAILs':
         methods = [
                     "expert",
 
                     "gail",
-                    "m_cond_gail",
-                    "m_reg_gail",
-                    "m_reg_gail_measure_entropy",
-                    "m_reg_gail_fitness_cond_measure_entropy",
-                    # "m_reg_gail_weighted_fitness_cond_measure_entropy",
-                    "m_cond_reg_gail",
+                    # "m_acgail_AuxLoss_NLL_Bonus_fitness_cond_measure_entropy",
+                    # "m_cond_acgail_AuxLoss_NLL_Bonus_fitness_cond_measure_entropy",
+
+                    # "m_acgail_AuxLoss_MSE_Bonus_fitness_cond_measure_entropy",
+                    # "m_cond_acgail_AuxLoss_MSE_Bonus_fitness_cond_measure_entropy",
+                    # "m_acgail_AuxLoss_MSE_Bonus_measure_error",
+                    # "m_cond_acgail_AuxLoss_MSE_Bonus_measure_error",
+                    # "m_cond_gail",
+
+                    "m_reg_gail_RegLoss_MSE_Bonus_measure_error",
+                    "m_reg_gail_RegLoss_MSE_Bonus_measure_entropy",
+                    # "m_reg_gail_RegLoss_MSE_Bonus_fitness_cond_measure_entropy",
+
+                    # "m_reg_gail_measure_entropy",
+                    # "m_reg_gail_fitness_cond_measure_entropy",
+                    # # "m_reg_gail_weighted_fitness_cond_measure_entropy",
+                    # "m_cond_reg_gail",
                     # "m_cond_reg_gail_measure_entropy",
                     # "m_cond_reg_gail_fitness_cond_measure_entropy",
 
-                    "vail",
+                    # "vail",
                     # "giril",
                 ]
         labels =  [
                     "PPGA-trueReward",
 
                     "GAIL",
-                    "mCondGAIL",
+                    # "mACGAIL_NLL_FCME",
+                    # "mCondACGAIL_NLL_FCME",
+
+                    # "mACGAIL_MSE_FCME",
+                    # "mCondACGAIL_MSE_FCME",
+                    # "mACGAIL_MSE_mCuriosity",
+                    # "mCondACGAIL_MSE_mCuriosity",
+                    # "mCondGAIL",
+
                     "mRegGAIL-mCuriosity",
                     "mRegGAIL-mEntropy",
-                    "mRegGAIL-fCondmEntropy",
-                    # "mRegGAIL-WfCondmEntropy",
-                    "mCondRegGAIL-mCuriosity",
-                    # "mCondRegGAIL-mEntropy",
-                    # "mCondRegGAIL-fCondmEntropy",
+                    # "mRegGAIL-FCME",
 
-                    "VAIL",
+                    #
+                    # "mRegGAIL-FCME",
+                    # "mRegGAIL-WFCME",
+                    # "mCondRegGAIL-mCuriosity",
+                    # "mCondRegGAIL-mEntropy",
+                    # "mCondRegGAIL-FCME",
+
+                    # "VAIL",
                 ]
     if ext_str == '_ICMs':
         methods = [
                     "expert",
 
                     "icm",
-                    "m_cond_icm",
-                    "m_reg_icm",
-                    "m_reg_icm_measure_entropy",
-                    "m_reg_icm_fitness_cond_measure_entropy",
-                    "m_cond_reg_icm",
+                    # "m_cond_icm",
+                    # "m_reg_icm",
+                    # "m_reg_icm_measure_entropy",
+                    # "m_reg_icm_fitness_cond_measure_entropy",
+                    # "m_cond_reg_icm",
                     # "m_cond_reg_icm_measure_entropy",
                     # "m_cond_reg_icm_fitness_cond_measure_entropy",
-                    "giril",
+                    # "giril",
                 ]
         labels =  [
                     "PPGA-trueReward",
 
                     "ICM",
-                    "mCondICM",
-                    "mRegICM-mCuriosity",
-                    "mRegICM-mEntropy",
-                    "mRegICM-fCondmEntropy",
-                    "mCondRegICM-mCuriosity",
+                    # "mCondICM",
+                    # "mRegICM-mCuriosity",
+                    # "mRegICM-mEntropy",
+                    # "mRegICM-FCME",
+                    # "mCondRegICM-mCuriosity",
                     # "mCondRegICM-mEntropy",
-                    # "mCondRegICM-fCondmEntropy",
+                    # "mCondRegICM-FCME",
 
-                    "GIRIL",
+                    # "GIRIL",
                 ]
 
 
-    games = [ "ant" ] # "walker2d", "humanoid",
+    games = ["humanoid","halfcheetah"] #  "ant" "walker2d",
+    # games = ["ant"]
     seeds=[1111] #,2222
-    # resultsfolder="experiments_best_elite"
-    # resultsfolder="experiments_100_random_elite"
-    # resultsfolder='experiments_4_random_elite_with_measures'
+
     data_str='good_and_diverse_elite_with_measures_top500'
-    num_demo=8
+    # data_str='good_and_diverse_elite_with_measures_topHalfMax'
+    num_demo=4
+    # num_demo=8
+    # num_demo=16
+    # num_demo=64
     resultsfolder=f'experiments_{num_demo}_{data_str}'
     results_dict= {game: get_method_scores(resultsfolder,game,methods,labels,seeds) for game in games}
     # times, qd_scores, coverages, best_perf, avg_perf

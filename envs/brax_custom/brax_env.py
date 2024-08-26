@@ -26,6 +26,14 @@ _to_custom_env = {
                     'kwargs': {
                         'clip_actions': (-1, 1),
                     }},
+    'hopper': {'custom_env_name': 'brax-custom-hopper-v0',
+                    'kwargs': {
+                        'clip_actions': (-1, 1),
+                    }},
+    'humanoidstandup': {'custom_env_name': 'brax_custom-humanoidstandup-v0',
+                 'kwargs': {
+                     'clip_actions': (-1, 1),
+                 }},
 }
 
 

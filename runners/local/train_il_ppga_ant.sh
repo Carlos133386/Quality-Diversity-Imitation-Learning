@@ -6,22 +6,23 @@ SEED=1111
 # SEED=2222
 
 # bonus_type='weighted_fitness_cond_measure_entropy'
-bonus_type='fitness_cond_measure_entropy'
+# bonus_type='fitness_cond_measure_entropy'
 # bonus_type='measure_entropsy'
-# bonus_type='measure_error'
+bonus_type='measure_error'
 
 # intrinsic_module='m_cond_reg_icm'
 # intrinsic_module='m_reg_icm'
 # intrinsic_module='m_cond_icm'
 # intrinsic_module='icm'
 
+intrinsic_module='zero'
 # intrinsic_module='gail'
 
 # intrinsic_module='m_acgail'
-intrinsic_module='m_cond_acgail'
+# intrinsic_module='m_cond_acgail'
 
-# auxiliary_loss_fn='MSE'
-auxiliary_loss_fn='NLL'
+auxiliary_loss_fn='MSE'
+# auxiliary_loss_fn='NLL'
 
 # intrinsic_module='m_cond_gail'
 # intrinsic_module='m_reg_gail'
@@ -31,14 +32,21 @@ auxiliary_loss_fn='NLL'
 
 GROUP_NAME="IL_ppga_"$ENV_NAME"_${intrinsic_module}"
 RUN_NAME=$GROUP_NAME"_seed_"$SEED
-num_demo=8
+num_demo=4
+demo_str=${num_demo}
+
+# num_elite=4
+# num_demo_per_elite=8
+# num_demo=`expr ${num_elite} \* ${num_demo_per_elite}`
+# demo_str=${num_elite}x${num_demo_per_elite}
+
 
 echo $RUN_NAME
 data_str=good_and_diverse_elite_with_measures_top500
 python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
                                      --intrinsic_module=${intrinsic_module} \
-                                     --demo_dir=trajs_${data_str}/${num_demo}episodes/ \
-                                     --reward_save_dir=reward_${num_demo}_${data_str}/ \
+                                     --demo_dir=trajs_${data_str}/${demo_str}episodes/ \
+                                     --reward_save_dir=reward_${demo_str}_${data_str}/ \
                                      --auxiliary_loss_fn=${auxiliary_loss_fn} \
                                      --bonus_type=${bonus_type} \
                                      --num_demo=${num_demo} \
@@ -67,5 +75,5 @@ python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
                                      --sigma0=3.0 \
                                      --threshold_min=-500 \
                                      --grid_size=$GRID_SIZE \
-                                     --expdir=./experiments_${num_demo}_${data_str}/$GROUP_NAME \
+                                     --expdir=./experiments_${demo_str}_${data_str}/$GROUP_NAME \
                                      --wandb_project IL_PPGA_${ENV_NAME}
