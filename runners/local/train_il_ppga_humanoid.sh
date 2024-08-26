@@ -31,7 +31,7 @@ auxiliary_loss_fn='MSE'
 # intrinsic_module='vail'
 
 
-GROUP_NAME=IL_ppga_"$ENV_NAME"_${intrinsic_module}_RegLoss_${auxiliary_loss_fn}_Bonus_${bonus_type}
+GROUP_NAME=IL_ppga_"$ENV_NAME"_${intrinsic_module} #_RegLoss_${auxiliary_loss_fn}_Bonus_${bonus_type}
 RUN_NAME=$GROUP_NAME"_seed_"$SEED
 num_demo=4
 echo $RUN_NAME
