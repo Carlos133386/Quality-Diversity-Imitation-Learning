@@ -154,10 +154,11 @@ if __name__ == '__main__':
         "mCondRegICM-mEntropy": ',',
         "mCondRegICM-FCME": ',',
         "GIRIL": ',',
-        "PPGA-trueReward": '*'
+        "PPGA-trueReward": '*',
+        "PPGA-zeroReward": '*' 
     }
     colors = {
-        "GAIL": "tab:brown",
+        "GAIL": "tab:green",
         "VAIL": "tab:blue",
         "mACGAIL_NLL_FCME": "green",
         "mCondACGAIL_NLL_FCME": "red",
@@ -183,13 +184,15 @@ if __name__ == '__main__':
         "mCondRegICM-FCME": "orange",
         "mCondRegICM-FCME": "pink",
         "GIRIL": 'gold',
-        "PPGA-trueReward": "black"
+        "PPGA-trueReward": "black",
+        "PPGA-zeroReward": "gray"
     }
     ext_str='_GAILs'
     # ext_str='_ICMs'
     if ext_str == '_GAILs':
         methods = [
                     "expert",
+                    "zero",
 
                     "gail",
                     # "m_acgail_AuxLoss_NLL_Bonus_fitness_cond_measure_entropy",
@@ -199,11 +202,12 @@ if __name__ == '__main__':
                     # "m_cond_acgail_AuxLoss_MSE_Bonus_fitness_cond_measure_entropy",
                     # "m_acgail_AuxLoss_MSE_Bonus_measure_error",
                     # "m_cond_acgail_AuxLoss_MSE_Bonus_measure_error",
-                    # "m_cond_gail",
+                    "m_cond_gail",
 
                     "m_reg_gail_RegLoss_MSE_Bonus_measure_error",
                     "m_reg_gail_RegLoss_MSE_Bonus_measure_entropy",
                     # "m_reg_gail_RegLoss_MSE_Bonus_fitness_cond_measure_entropy",
+                    "m_cond_reg_gail",
 
                     # "m_reg_gail_measure_entropy",
                     # "m_reg_gail_fitness_cond_measure_entropy",
@@ -217,6 +221,7 @@ if __name__ == '__main__':
                 ]
         labels =  [
                     "PPGA-trueReward",
+                    "PPGA-zeroReward",
 
                     "GAIL",
                     # "mACGAIL_NLL_FCME",
@@ -226,11 +231,12 @@ if __name__ == '__main__':
                     # "mCondACGAIL_MSE_FCME",
                     # "mACGAIL_MSE_mCuriosity",
                     # "mCondACGAIL_MSE_mCuriosity",
-                    # "mCondGAIL",
+                    "mCondGAIL",
 
                     "mRegGAIL-mCuriosity",
                     "mRegGAIL-mEntropy",
                     # "mRegGAIL-FCME",
+                    "mCondRegGAIL-mEntropy",
 
                     #
                     # "mRegGAIL-FCME",
@@ -271,14 +277,14 @@ if __name__ == '__main__':
                 ]
 
 
-    games = ["humanoid","halfcheetah"] #  "ant" "walker2d",
-    # games = ["ant"]
+    # games = ["humanoid","halfcheetah"] #  "ant" "walker2d",
+    games = ["ant"]
     seeds=[1111] #,2222
 
     data_str='good_and_diverse_elite_with_measures_top500'
     # data_str='good_and_diverse_elite_with_measures_topHalfMax'
-    num_demo=4
-    # num_demo=8
+    # num_demo=4
+    num_demo=8
     # num_demo=16
     # num_demo=64
     resultsfolder=f'experiments_{num_demo}_{data_str}'

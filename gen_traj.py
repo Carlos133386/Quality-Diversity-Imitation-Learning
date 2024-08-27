@@ -455,7 +455,7 @@ def gen_multi_trajs(agent_type='random', num_elite=4, num_demo_per_elite=1, env_
 topk=500
 # topk='HalfMax'
 for num_elite in [4]:
-    for env_name in ['halfcheetah']: # , 'walker2d', 'humanoid', 'ant'
+    for env_name in ['hopper', 'halfcheetah']: # , 'walker2d', 'humanoid', 'ant'
         # gen_multi_trajs(agent_type='best', num_elite=num_elite, env_name=env_name)
         # gen_multi_trajs(agent_type='random', num_elite=num_elite, env_name=env_name)
         if env_name == 'ant':

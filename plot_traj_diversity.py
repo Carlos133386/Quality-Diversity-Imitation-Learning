@@ -73,21 +73,7 @@ def visualize(num_demo=4, env_name='walker2d', topk=150):
     plt.close()
 
 if __name__ == '__main__':
-    # topk=100
-    # topk=150
-    # topk=200
-    # topk=250
-    # topk=300
-    # topk=350
-    # topk=400
-    # topk=450
-    # topk=500
-    # topk=600
-    # topk=700
-    # topk=800
-    # topk=900
-    # topk=1000
-    for topk in [500]: #'HalfMax'
-        for env_name in ['ant']: # , 
-            for num_demo in [8]: #, 4, 8, 16, 32, 64
+    for topk in [500, 'HalfMax']: #
+        for env_name in ['ant']: # , 'halfcheetah'
+            for num_demo in [4]: #, 4, 8, 16, 32, 64
                 visualize(num_demo, env_name, topk)

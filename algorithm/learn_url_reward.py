@@ -1237,6 +1237,7 @@ class mCondRegGAIL(object):
                  obs_dim,
                  action_dim,
                  measure_dim,
+                 reg_loss_fn='MSE',
                  bonus_type='measure_error',
                  device='cuda:0',
                  lr=3e-4,
