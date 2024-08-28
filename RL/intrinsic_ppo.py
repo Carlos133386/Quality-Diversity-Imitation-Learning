@@ -650,7 +650,8 @@ class IntrinsicPPO:
                     reward_loss = self.reward_model.update(self.dataloader, self.cfg.num_minibatches, 
                                                            b_obs.detach(), b_actions.detach())        
 
-                if self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_acgail', 'm_cond_acgail']:
+                if self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_reg_gail',
+                                             'm_acgail', 'm_cond_acgail']:
                     b_measures = self.measures.transpose(0, 1).reshape(num_agents, -1, self.cfg.num_dims)
                     reward_loss = self.reward_model.update(self.dataloader, self.cfg.num_minibatches, 
                                                            b_obs.detach(), b_actions.detach(), b_measures.detach())        

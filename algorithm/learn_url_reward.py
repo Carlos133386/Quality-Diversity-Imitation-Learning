@@ -426,12 +426,12 @@ class GAIL(object):
                                b_obs, 
                                b_actions,
                                num_minibatches,
-                               minibatch_size=None
+                               minibatch_size
                                ):
 
         batch_size = b_obs.shape[1]
-        if minibatch_size is None:
-            minibatch_size = batch_size // num_minibatches
+        # if minibatch_size is None:
+        #     minibatch_size = batch_size // num_minibatches
         sampler = BatchSampler(
             SubsetRandomSampler(range(batch_size)),
             minibatch_size,
@@ -449,6 +449,7 @@ class GAIL(object):
 
         loss = 0
         n = 0
+        # pdb.set_trace()
         for expert_batch, policy_batch in zip(expert_loader,
                                               policy_data_generator):
             policy_state, policy_action = policy_batch[0], policy_batch[1]

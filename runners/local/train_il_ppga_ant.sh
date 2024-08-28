@@ -16,7 +16,7 @@ bonus_type='measure_entropy'
 # intrinsic_module='icm'
 
 # intrinsic_module='zero'
-# intrinsic_module='gail'
+intrinsic_module='gail'
 
 # intrinsic_module='m_acgail'
 # intrinsic_module='m_cond_acgail'
@@ -26,7 +26,7 @@ auxiliary_loss_fn='MSE'
 
 # intrinsic_module='m_cond_gail'
 # intrinsic_module='m_reg_gail'
-intrinsic_module='m_cond_reg_gail'
+# intrinsic_module='m_cond_reg_gail'
 # intrinsic_module='vail'
 # intrinsic_module='giril'
 
@@ -38,8 +38,8 @@ num_demo_per_elite=50
 num_demo=`expr ${num_elite} \* ${num_demo_per_elite}`
 demo_str=${num_elite}x${num_demo_per_elite}
 
-gail_batchsize=3000
-# max gail_batchsize=min(env_batch_size, num_demo*1000/20). (20 is the subsample frequency when loading data)
+gail_batchsize=12000
+# max gail_batchsize=num_demo*1000/20. (20 is the subsample frequency when loading data)
 
 echo $RUN_NAME
 data_str=good_and_diverse_elite_with_measures_top500
