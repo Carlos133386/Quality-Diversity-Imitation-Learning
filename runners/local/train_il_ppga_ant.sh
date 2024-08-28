@@ -42,8 +42,7 @@ gail_batchsize=3000
 # max gail_batchsize=min(env_batch_size, num_demo*1000/20). (20 is the subsample frequency when loading data)
 
 echo $RUN_NAME
-# data_str=good_and_diverse_elite_with_measures_top500
-data_str=good_and_diverse_elite_with_measures_topHalfMax
+data_str=good_and_diverse_elite_with_measures_top500
 python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
                                      --intrinsic_module=${intrinsic_module} \
                                      --demo_dir=trajs_${data_str}/${demo_str}episodes/ \
