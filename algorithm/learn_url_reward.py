@@ -1255,6 +1255,7 @@ class mCondRegGAIL(object):
         self.measure_predict_model = ForwardDynamicsModel(obs_dim=obs_dim, action_dim=action_dim, \
                                                       hidden_dim=100, output_dim=measure_dim).to(device)
         self.bonus_type = bonus_type
+        self.reg_loss_fn = reg_loss_fn
         if self.bonus_type == 'measure_entropy':
             rms = RMS(self.device)
             knn_rms = False
