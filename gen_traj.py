@@ -8,6 +8,7 @@ from pathlib import Path
 import pickle
 
 import numpy as np
+from tqdm import tqdm 
 from attrdict import AttrDict
 from RL.ppo import *
 from utils.utilities import log
@@ -394,7 +395,7 @@ def gen_multi_trajs(agent_type='random', num_elite=4, num_demo_per_elite=1, env_
             elite = elites[i]
             agent, demonstrator_measure = get_good_and_diverse_elite(elite, actor_cfg)
         
-        for j in range(num_demo_per_elite):
+        for j in tqdm(range(num_demo_per_elite)):
             eps_states, eps_actions, eps_rewards, eps_measures, eps_return, eps_length = \
                 gen_1_traj(env, agent, actor_cfg, env_cfg)
             states.append(eps_states)
@@ -455,11 +456,11 @@ def gen_multi_trajs(agent_type='random', num_elite=4, num_demo_per_elite=1, env_
 topk=500
 # topk='HalfMax'
 for num_elite in [4]:
-    for env_name in ['hopper', 'halfcheetah']: # , 'walker2d', 'humanoid', 'ant'
+    for env_name in ['ant', ]: # , 'walker2d', 'humanoid', 'hopper', 'halfcheetah'
         # gen_multi_trajs(agent_type='best', num_elite=num_elite, env_name=env_name)
         # gen_multi_trajs(agent_type='random', num_elite=num_elite, env_name=env_name)
         if env_name == 'ant':
-            num_demo_per_elite=8
+            num_demo_per_elite=50
         else:
             num_demo_per_elite=1
         gen_multi_trajs(agent_type='good_and_diverse', 

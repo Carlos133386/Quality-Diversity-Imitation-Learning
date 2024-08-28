@@ -152,7 +152,7 @@ def load_sa_data(args, return_next_state=True):
     print(f'Loading data: {traj_file}')
     dataset = ExpertDataset(file_name=traj_file, num_trajectories=args.num_demo, train=True, 
                             train_test_split=1.0, return_next_state=return_next_state)
-    dataloader = DataLoader(dataset, batch_size=args.num_minibatches, shuffle=False, num_workers=1, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=args.gail_batchsize, shuffle=False, num_workers=1, drop_last=True)
     return dataset, dataloader
 
 #### ICM model
@@ -426,7 +426,8 @@ class GAIL(object):
                                b_obs, 
                                b_actions,
                                num_minibatches,
-                               minibatch_size=None):
+                               minibatch_size=None
+                               ):
 
         batch_size = b_obs.shape[1]
         if minibatch_size is None:
@@ -443,7 +444,8 @@ class GAIL(object):
 
 
     def update(self, expert_loader, num_minibatches, b_obs, b_actions, obsfilt=None):
-        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, num_minibatches, expert_loader.batch_size)
+        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, num_minibatches, 
+                                                            expert_loader.batch_size)
 
         loss = 0
         n = 0
@@ -1520,7 +1522,8 @@ class VAIL(object):
             yield obs_batch, actions_batch
 
     def update(self, expert_loader, num_minibatches, b_obs, b_actions, obsfilt=None):
-        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, num_minibatches, expert_loader.batch_size)
+        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, num_minibatches, 
+                                                            expert_loader.batch_size)
 
 
         loss = 0

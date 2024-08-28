@@ -69,6 +69,9 @@ def parse_args():
     parser.add_argument('--gamma', type=float, default=0.99, help='Discount factor for rewards')
     parser.add_argument('--gae_lambda', type=float, default=0.95, help='Lambda discount used for general advantage est')
     parser.add_argument('--num_minibatches', type=int, default=32)
+    parser.add_argument('--gail_batchsize', type=int, default=200, 
+                        help='batchsize for update discriminator in GAILs. max gail_batchsize=min(env_batch_size, num_demo*1000/20).')
+                        #  (20 is the subsample frequency when loading data)
     parser.add_argument('--update_epochs', type=int, default=10, help='The K epochs to update the policy')
     parser.add_argument("--norm_adv", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
                         help="Toggles advantages normalization")

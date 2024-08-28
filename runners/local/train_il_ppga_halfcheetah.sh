@@ -10,15 +10,15 @@ SEED=1111
 
 # bonus_type='weighted_fitness_cond_measure_entropy'
 # bonus_type='fitness_cond_measure_entropy'
-# bonus_type='measure_entropy'
-bonus_type='measure_error'
+bonus_type='measure_entropy'
+# bonus_type='measure_error'
 
 # intrinsic_module='m_cond_reg_icm'
 # intrinsic_module='m_reg_icm'
 # intrinsic_module='m_cond_icm'
 # intrinsic_module='icm'
 
-intrinsic_module='zero'
+# intrinsic_module='zero'
 # intrinsic_module='gail'
 
 # intrinsic_module='m_acgail'
@@ -29,13 +29,14 @@ auxiliary_loss_fn='MSE'
 
 # intrinsic_module='m_cond_gail'
 # intrinsic_module='m_reg_gail'
-# intrinsic_module='m_cond_reg_gail'
+intrinsic_module='m_cond_reg_gail'
 # intrinsic_module='vail'
 
 
 GROUP_NAME=IL_ppga_"$ENV_NAME"_${intrinsic_module} #_RegLoss_${auxiliary_loss_fn}_Bonus_${bonus_type}
 RUN_NAME=$GROUP_NAME"_seed_"$SEED
 num_demo=4
+gail_batchsize=200
 echo $RUN_NAME
 data_str=good_and_diverse_elite_with_measures_top500
 
@@ -51,6 +52,7 @@ python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
                                 --auxiliary_loss_fn=${auxiliary_loss_fn} \
                                 --bonus_type=${bonus_type} \
                                 --num_demo ${num_demo} \
+                                --gail_batchsize=${gail_batchsize} \
                                 --rollout_length=128 \
                                 --use_wandb=False \
                                 --wandb_group=paper \

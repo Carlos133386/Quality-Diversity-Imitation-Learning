@@ -124,15 +124,16 @@ class ExpertDataset(torch.utils.data.TensorDataset):
 
 
 if __name__ == "__main__":
-    traj_root = 'trajs_random_elite_with_measures/10episodes'
+    traj_root = 'trajs_good_and_diverse_elite_with_measures_top500/4episodes'
     env_name='humanoid'
     traj_file = f'{traj_root}/trajs_ppga_{env_name}.pt'
     print(f'Loading data: {traj_file}')
-    dataset = ExpertDataset(file_name=traj_file,num_trajectories=4, train=True, train_test_split=1.0, return_next_state=True)
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=1, drop_last=True)
-    # for state, action, next_state, measure, next_measure in dataloader:
-    #     print(state.shape, '==')
-    #     print(action.shape)
-    #     print(next_state.shape)
-    #     print(measure.shape)
-    #     print(next_measure.shape)
+    dataset = ExpertDataset(file_name=traj_file,num_trajectories=1, train=True, train_test_split=1.0, return_next_state=True)
+    dataloader = DataLoader(dataset, batch_size=50, shuffle=False, num_workers=1, drop_last=True)
+    pdb.set_trace()
+    for state, action, next_state, measure, next_measure in dataloader:
+        print(state.shape, '==')
+        print(action.shape)
+        print(next_state.shape)
+        print(measure.shape)
+        print(next_measure.shape)

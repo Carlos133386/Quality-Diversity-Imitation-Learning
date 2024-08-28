@@ -47,6 +47,7 @@ def visualize(num_demo=4, env_name='walker2d', topk=150):
     ax.legend(handles,labels, loc="best")
     ax.set_title(f'{env_name}, {num_demo} demos (red), top{topk} (blue)')
     plt.savefig(file_name.replace('pt', 'png'))
+    plt.savefig(file_name.replace('pt', 'pdf'))
     plt.close()
     if env_name == 'ant':
         fig, ax = plt.subplots()
@@ -69,11 +70,12 @@ def visualize(num_demo=4, env_name='walker2d', topk=150):
         ax.legend(handles,labels, loc="best")
         ax.set_title(f'{env_name}, {num_demo} demos (red), top{topk} (blue)')
         plt.savefig(file_name.replace('.pt', '_last2dims.png'))
+        plt.savefig(file_name.replace('.pt', '_last2dims.pdf'))
 
     plt.close()
 
 if __name__ == '__main__':
     for topk in [500, 'HalfMax']: #
-        for env_name in ['ant']: # , 'halfcheetah'
+        for env_name in ['halfcheetah']: # 'humanoid', , 'walker2d', 'ant'
             for num_demo in [4]: #, 4, 8, 16, 32, 64
                 visualize(num_demo, env_name, topk)

@@ -12,12 +12,12 @@ from ribs.emitters.opt._xnes import ExponentialES
 from ribs.emitters.rankers import _get_ranker
 from utils.utilities import log
 from ribs.archives import ArchiveBase
-from RL.ppo import PPO
+# from RL.ppo import PPO
 
 
 class PPGAEmitter(DQDEmitterBase):
     def __init__(self,
-                 ppo: PPO,
+                 ppo,
                  archive: ArchiveBase,
                  x0: np.ndarray,
                  sigma0: float,
