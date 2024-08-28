@@ -38,7 +38,7 @@ num_demo_per_elite=50
 num_demo=`expr ${num_elite} \* ${num_demo_per_elite}`
 demo_str=${num_elite}x${num_demo_per_elite}
 
-gail_batchsize=12000
+gail_batchsize=10000
 # max gail_batchsize=num_demo*1000/20. (20 is the subsample frequency when loading data)
 
 echo $RUN_NAME
