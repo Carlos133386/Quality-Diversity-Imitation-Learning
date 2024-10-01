@@ -1,3 +1,4 @@
+
 # Proximal Policy Gradient Arborescence 
 The official repo of PPGA! Implemented in PyTorch and run with [Brax](https://github.com/google/brax), a GPU-Accelerated
 high-throughput simulator for rigid bodies. This project also contains a modified version of [pyribs](https://github.com/icaros-usc/pyribs),
@@ -99,3 +100,5 @@ Trained archives reported in the paper and scheduler checkpoints are hosted on G
 | Walker2D        | $5.82 \times 10^6$ | 67.8%        | 4796            | `./runners/local/train_ppga_walker2d.sh`    |
 | HalfCheetah     | $2.94 \times 10^7$ | 98.4%        | 9335            | `./runners/local/train_ppga_halfcheetah.sh` |
 | Ant             | $2.26 \times 10^7$ | 53.1%        | 7854            | `./runners/local/train_ppga_ant.sh`         |
+
+
