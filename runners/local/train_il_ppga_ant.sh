@@ -8,6 +8,8 @@ SEED=1111
 # bonus_type='weighted_fitness_cond_measure_entropy'
 # bonus_type='fitness_cond_measure_entropy'
 bonus_type='measure_entropy'
+bonus_type='single_step_bonus'
+bonus_type='None'
 # bonus_type='measure_error'
 
 # intrinsic_module='m_cond_reg_icm'
@@ -16,7 +18,10 @@ bonus_type='measure_entropy'
 # intrinsic_module='icm'
 
 # intrinsic_module='zero'
-intrinsic_module='gail'
+#intrinsic_module='m_cond_reg_gail'
+intrinsic_module='abgail'
+
+#intrinsic_module='m_reg_gail'
 
 # intrinsic_module='m_acgail'
 # intrinsic_module='m_cond_acgail'
@@ -43,7 +48,28 @@ gail_batchsize=10000
 
 echo $RUN_NAME
 data_str=good_and_diverse_elite_with_measures_top500
+archive_bonus=True
+
+if [ "$archive_bonus" = "True" ]; then
+    GROUP_NAME="${GROUP_NAME}_archive_bonus"
+fi
+
+if [ "$archive_bonus" = "False" ] && [ "$bonus_type" = "None" ]; then
+    GROUP_NAME="${GROUP_NAME}_pure"
+fi
+
+wo_a=False
+if [ "$wo_a" = "True" ]; then
+    GROUP_NAME="${GROUP_NAME}_wo_a"
+fi
+
+bonus_smooth=False
+if [ "$bonus_smooth" = "False" ]; then
+    GROUP_NAME="${GROUP_NAME}_wo_smooth"
+fi
+archive_lr=0.5
 python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
+                                     --archive_bonus=${archive_bonus} \
                                      --intrinsic_module=${intrinsic_module} \
                                      --demo_dir=trajs_${data_str}/${demo_str}episodes/ \
                                      --reward_save_dir=reward_${demo_str}_${data_str}/ \
@@ -71,7 +97,7 @@ python -m algorithm.train_il_ppga --env_name=$ENV_NAME \
                                      --dqd_algorithm=cma_maega \
                                      --calc_gradient_iters=10 \
                                      --move_mean_iters=10 \
-                                     --archive_lr=0.1 \
+                                     --archive_lr=${archive_lr} \
                                      --restart_rule=no_improvement \
                                      --sigma0=3.0 \
                                      --threshold_min=-500 \

@@ -6,7 +6,7 @@ import errno
 import numpy as np
 import torch
 import codecs
-import pickle5 as pickle
+import pickle as pickle
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.functional as F

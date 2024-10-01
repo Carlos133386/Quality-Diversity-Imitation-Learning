@@ -25,6 +25,8 @@ from torchvision.utils import make_grid
 from torch.utils.data import Subset
 import pdb
 
+from math import ceil, exp, sqrt
+from typing import Dict, Optional, Tuple
 
 
 def process(tensor, normalize=False, range=None, scale_each=False):
@@ -238,6 +240,11 @@ class ForwardDynamicsModel(nn.Module):
 
         return output
 
+
+
+
+
+
 # GAIL and VAIL
 
 # GAIL discriminator
@@ -277,6 +284,149 @@ class GAILdiscriminator(nn.Module):
         x = self.output(x)
         return x
 
+class GAILdiscriminator_wo_a(nn.Module):
+
+    def __init__(self, input_dim, 
+                 hidden_dim, action_dim):
+
+        super(GAILdiscriminator_wo_a, self).__init__()
+        self.input_dim = input_dim
+        self.output_dim = 1
+        self.hidden = hidden_dim
+        self.action_dim = action_dim 
+
+        # discriminator architecture
+        self.linear_1 = nn.Linear(in_features=self.input_dim, out_features=self.hidden)
+        self.linear_2 = nn.Linear(in_features=self.hidden, out_features=self.hidden)
+        self.output = nn.Linear(in_features=self.hidden, out_features=self.output_dim)
+
+        # Leaky relu activation
+        self.tanh_1 = nn.Tanh()
+        self.tanh_2 = nn.Tanh()
+
+        # Output Activation
+        # self.softmax = nn.Softmax()
+
+        # Initialize the weights using xavier initialization
+        nn.init.xavier_uniform_(self.linear_1.weight)
+        nn.init.xavier_uniform_(self.linear_2.weight)
+        nn.init.xavier_uniform_(self.output.weight)
+
+    def forward(self, x):
+        #x的最后一个维度只取前input_dim个
+        x = x[..., :self.input_dim]
+        
+        x = self.linear_1(x)
+        x = self.tanh_1(x)
+        x = self.linear_2(x)
+        x = self.tanh_2(x)
+        x = self.output(x)
+        return x
+    
+    
+    
+    
+    
+from math import ceil, exp, sqrt
+from typing import Dict, Optional, Tuple
+from torch import Tensor
+class PWIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 expert_dataloader,
+                 reward_scale=1.0,
+                 reward_bandwidth_scale=1.0,
+                 time_horizon=1000,
+                 device='cuda:0',
+                 ):
+
+        self.device = device
+        self.action_dim = action_dim
+        self.expert_dataloader = expert_dataloader
+        self.expert_memory = iter(self.expert_dataloader)
+        self.time_horizon =  time_horizon
+        self.data_scale, self.data_offset = self._calculate_normalisation_scale_offset(self._get_expert_atoms())  # Calculate normalisation parameters for the data
+        self.reward_scale = reward_scale 
+        self.reward_bandwidth = reward_bandwidth_scale * self.time_horizon / sqrt(obs_dim + action_dim)  # Reward function hyperparameters (based on α and β)
+        self.reset()
+
+    # Returns the scale and offset to normalise data based on mean and standard deviation
+    def _calculate_normalisation_scale_offset(self, data: Tensor) -> Tuple[Tensor, Tensor]:
+        inv_scale, offset = data.std(dim=0, keepdims=True), -data.mean(dim=0, keepdims=True)  # Calculate statistics over dataset
+        inv_scale[inv_scale == 0] = 1  # Set (inverse) scale to 1 if feature is constant (no variance)
+        return 1 / inv_scale, offset
+
+    # Returns a tensor with a "row" (dim 0) deleted
+    def _delete_row(self, data: Tensor, index: int) -> Tensor:
+        return torch.cat([data[:index], data[index + 1:]], dim=0)
+
+    def _get_expert_atoms(self, expert_state=None, expert_action=None) -> Tensor:
+        if expert_state==None and expert_action==None:
+            try:
+                expert_batch = next(self.expert_memory)
+            except:
+                self.expert_memory = iter(self.expert_dataloader)
+                expert_batch = next(self.expert_memory)
+            expert_state, expert_action, expert_m = expert_batch
+        return torch.cat([expert_state, expert_action], dim=1).to(self.device)
+
+    def reset(self):
+        self.expert_atoms = self.data_scale * (self._get_expert_atoms() + self.data_offset)  # Get and normalise the expert atoms
+        self.expert_weights = torch.full((self.expert_atoms.shape[0], ), 1 / self.expert_atoms.shape[0]).to(self.device)
+
+    # parallized version
+    def calculate_intrinsic_reward(self, state, action, 
+                                   use_original_reward=True, alpha=1e-8, reward_type=None):
+        # Normalize agent atoms for the whole batch
+        agent_atoms = torch.cat([state, action], dim=1)
+        agent_atoms = self.data_scale * (agent_atoms + self.data_offset)  # Normalize agent atoms
+
+        # Compute pairwise distances between agent atoms and expert atoms
+        dists = torch.cdist(agent_atoms, self.expert_atoms)  # Shape: [batch_size, num_expert_atoms]
+
+        # Initialize weights and costs
+        weights = torch.full((state.shape[0],), 1 / self.time_horizon - 1e-6).to(self.device)
+        costs = torch.zeros(state.shape[0], device=self.device)
+
+        # Repeat the expert atoms and weights to match batch size
+        expert_atoms = self.expert_atoms.clone()
+        expert_weights = self.expert_weights.clone()
+
+        # Iterate until all weights in the batch are zero
+        while torch.any(weights > 0):
+            # Find the closest expert atom for each agent atom
+            closest_expert_idx = dists.argmin(dim=1)  # Shape: [batch_size]
+            closest_dists = dists.gather(1, closest_expert_idx.unsqueeze(1)).squeeze(1)
+
+            # Get expert weights of the closest atoms
+            closest_expert_weights = expert_weights[closest_expert_idx]
+
+            # Compute how much weight to subtract
+            weight_to_subtract = torch.minimum(weights, closest_expert_weights)
+
+            # Update the costs for each agent
+            costs += weight_to_subtract * closest_dists
+
+            # Update expert weights and batch weights
+            expert_weights[closest_expert_idx] -= weight_to_subtract
+            weights -= weight_to_subtract
+
+            # Set weights of exhausted expert atoms to zero
+            expert_mask = expert_weights > 0
+            expert_atoms = expert_atoms[expert_mask]
+            expert_weights = expert_weights[expert_mask]
+
+            # Update distances by keeping only the remaining expert atoms
+            dists = torch.cdist(agent_atoms, expert_atoms)
+
+        # Calculate rewards for the batch
+        rewards = self.reward_scale * torch.exp(-self.reward_bandwidth * costs)
+
+        return rewards
+    
+    
+    
 # VAIL discriminator
 class VAILdiscriminator(nn.Module):
 
@@ -504,7 +654,190 @@ class GAIL(object):
                 return reward 
             else:
                 return reward / np.sqrt(self.ret_rms.var[0] + alpha)
+#archive_bonus_GAIL
+class abGAIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim,
+                 device='cuda:0',
+                 bonus_type='single_step_bonus',
+                 lr=3e-4,
+                 wo_a = False
+                 ):
 
+
+        self.device = device
+        self.action_dim = action_dim
+        self.bonus_type = bonus_type
+        if wo_a:
+            self.discriminator = GAILdiscriminator_wo_a(input_dim=obs_dim,  \
+                                     hidden_dim=100, action_dim=self.action_dim).to(device)
+        else:
+            self.discriminator = GAILdiscriminator(input_dim=obs_dim,  \
+                                     hidden_dim=100, action_dim=self.action_dim).to(device)
+
+
+        self.lr = lr
+        self.intrinsic_reward_rms = RMS(device=self.device)
+
+        self.gail_optim = optim.Adam(
+                                [
+                                    {'params': self.discriminator.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+        
+        self.returns = None
+        self.ret_rms = RunningMeanStd(shape=())
+        self.ob_rms = RunningMeanStd(shape=())
+        self.env_info = {'obs_dim': obs_dim, 'action_dim': action_dim, 'measure_dim': measure_dim}
+        self.single_step_archive = torch.ones([2]*measure_dim).to(self.device)#shape: 2*2*2*2...(measure_dim)
+        
+    def update_single_step_archive(self, single_step_measure):
+        '''
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        '''
+        indices = single_step_measure.t().long() 
+        values = torch.ones(single_step_measure.size(0)).to(self.device)  
+
+        
+        self.single_step_archive.index_put_(tuple(indices), values, accumulate=True)
+    def calculate_single_step_bonus(self, single_step_measure,k=5):
+        '''
+        archive_distribution: tensor of shape (2,2,2,2,...,2) 2^measure_dim
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        
+        return: tensor of shape (batch_size,)
+        '''
+        archive_distribution = self.single_step_archive / self.single_step_archive.sum()
+        
+        indices = list(single_step_measure.long().t()) # measure_dim * batch_size
+       
+        prob = archive_distribution[indices] # shape: (batch_size,)
+        
+        bonus = 1/(1 + prob) # is it good?
+        bonus = 0.5*torch.exp(-k * prob)
+
+        return bonus
+
+    def compute_grad_pen(self,
+                        expert_state,
+                        expert_action,
+                        policy_state,
+                        policy_action,
+                        lambda_=10):
+
+       expert_data = torch.cat([expert_state, expert_action], dim=1)
+       policy_data = torch.cat([policy_state, policy_action], dim=1)
+
+       alpha = torch.rand_like(expert_data).to(expert_data.device)
+
+       mixup_data = alpha * expert_data + (1 - alpha) * policy_data
+       mixup_data.requires_grad = True
+
+       disc = self.discriminator(mixup_data)
+       ones = torch.ones(disc.size()).to(disc.device)
+       grad = autograd.grad(
+           outputs=disc,
+           inputs=mixup_data,
+           grad_outputs=ones,
+           create_graph=True,
+           retain_graph=True,
+           only_inputs=True)[0]
+
+       grad_pen = lambda_ * (grad.norm(2, dim=1) - 1).pow(2).mean()
+       return grad_pen
+
+    def feed_forward_generator(self,
+                               b_obs, 
+                               b_actions,
+                               num_minibatches,
+                               minibatch_size
+                               ):
+
+        batch_size = b_obs.shape[1]
+        # if minibatch_size is None:
+        #     minibatch_size = batch_size // num_minibatches
+        sampler = BatchSampler(
+            SubsetRandomSampler(range(batch_size)),
+            minibatch_size,
+            drop_last=True)
+        for indices in sampler:
+            obs_batch = b_obs.view(-1, b_obs.shape[-1])[indices]
+            actions_batch = b_actions.view(-1, b_actions.shape[-1])[indices]
+
+            yield obs_batch, actions_batch
+
+
+    def update(self, expert_loader, num_minibatches, b_obs, b_actions, obsfilt=None):
+        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, num_minibatches, 
+                                                            expert_loader.batch_size)
+
+        loss = 0
+        n = 0
+        # pdb.set_trace()
+        for expert_batch, policy_batch in zip(expert_loader,
+                                              policy_data_generator):
+            policy_state, policy_action = policy_batch[0], policy_batch[1]
+            policy_d = self.discriminator(
+                torch.cat([policy_state, policy_action], dim=1))
+
+            expert_state, expert_action, _ = expert_batch
+            if obsfilt is not None:
+                expert_state = obsfilt(expert_state.numpy(), update=False)
+            
+            expert_state = torch.FloatTensor(expert_state).to(self.device)
+            expert_action = expert_action.to(self.device)
+            expert_d = self.discriminator(
+                torch.cat([expert_state, expert_action], dim=1))
+
+            expert_loss = F.binary_cross_entropy_with_logits(
+                expert_d,
+                torch.ones(expert_d.size()).to(self.device))
+            policy_loss = F.binary_cross_entropy_with_logits( 
+                policy_d,
+                torch.zeros(policy_d.size()).to(self.device))
+
+            gail_loss = expert_loss + policy_loss
+            grad_pen = self.compute_grad_pen(expert_state, expert_action,
+                                            policy_state, policy_action)
+
+            loss += (gail_loss + grad_pen).item()
+            # loss += gail_loss.item()
+            n += 1
+
+            self.gail_optim.zero_grad()
+            (gail_loss + grad_pen).backward()
+            # gail_loss.backward()
+            self.gail_optim.step()
+        return loss / n
+
+    def calculate_intrinsic_reward(self, state, action, measure, value=None,
+                       use_original_reward=True, alpha=1e-8, reward_type='log1-d'):
+        with torch.no_grad():
+            d = self.discriminator(torch.cat([state, action], dim=1))
+            s = torch.sigmoid(d)  
+            # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
+            bonus = 0
+            if reward_type == 'logd':
+                reward =  torch.log(s + alpha)
+            if reward_type == 'log1-d':
+                reward =  - torch.log(1 - s + alpha)
+            if self.returns is None:
+                self.returns = reward.clone()
+            if self.bonus_type == 'single_step_bonus':
+                bonus = self.calculate_single_step_bonus(measure)
+                self.update_single_step_archive(measure)
+            
+            reward = reward.squeeze(1) + bonus
+
+            if use_original_reward:
+                return reward 
+            else:
+                return reward / np.sqrt(self.ret_rms.var[0] + alpha)
 # measure conditioned GAIL
 class mCondGAIL(object):
     def __init__(self,
@@ -513,13 +846,17 @@ class mCondGAIL(object):
                  measure_dim, 
                  device='cuda:0',
                  lr=3e-4,
+                 wo_a = False
                  ):
 
 
         self.device = device
         self.action_dim = action_dim
-        
-        self.discriminator = GAILdiscriminator(input_dim=obs_dim+measure_dim,  \
+        if wo_a:
+            self.discriminator = GAILdiscriminator_wo_a(input_dim=obs_dim+measure_dim,  \
+                                     hidden_dim=100, action_dim=self.action_dim).to(device)
+        else:
+            self.discriminator = GAILdiscriminator(input_dim=obs_dim+measure_dim,  \
                                      hidden_dim=100, action_dim=self.action_dim).to(device)
 
 
@@ -650,6 +987,10 @@ class mCondGAIL(object):
                 return reward 
             else:
                 return reward / np.sqrt(self.ret_rms.var[0] + alpha)
+            
+            
+            
+
 
 # measure-targeted Auxiliary Classifier GAIL
 class mACGAIL(object):
@@ -1086,7 +1427,40 @@ class mRegGAIL(object):
         self.returns = None
         self.ret_rms = RunningMeanStd(shape=())
         self.ob_rms = RunningMeanStd(shape=())
+        self.env_info = {'obs_dim': obs_dim, 'action_dim': action_dim, 'measure_dim': measure_dim}
+        self.single_step_archive = torch.ones([2]*measure_dim).to(self.device)#shape: 2*2*2*2...(measure_dim)
+        
+    def update_single_step_archive(self, single_step_measure):
+        '''
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        '''
+        indices = single_step_measure.t().long()  # Transpose to get the indices in the correct format
+        values = torch.ones(single_step_measure.size(0)).to(self.device)  # Create a tensor of ones with size batch_size
 
+        # Use scatter_add_ to accumulate values in the archive
+        self.single_step_archive.index_put_(tuple(indices), values, accumulate=True)
+    def calculate_single_step_bonus(self, single_step_measure):
+        '''
+        archive_distribution: tensor of shape (2,2,2,2,...,2) 2^measure_dim
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        
+        return: tensor of shape (batch_size,)
+        '''
+        archive_distribution = self.single_step_archive / self.single_step_archive.sum()
+        
+        indices = list(single_step_measure.long().t()) # measure_dim * batch_size
+        
+        prob = archive_distribution[indices] # shape: (batch_size,)
+        
+        bonus = 1/(1 + prob) # is it good?
+        return bonus
+        
+        
+        
+        
+        
     def compute_grad_pen(self,
                         expert_state,
                         expert_action,
@@ -1193,6 +1567,7 @@ class mRegGAIL(object):
             (gail_loss + grad_pen).backward()
             # gail_loss.backward()
             self.gail_optim.step()
+        
         return loss / n
 
     def calculate_intrinsic_reward(self, state, action, measure, value=None,
@@ -1208,6 +1583,7 @@ class mRegGAIL(object):
                 gail_reward =  - torch.log(1 - s + alpha)
 
             gail_reward = gail_reward.squeeze(1)
+            bonus = 0
             if self.bonus_type == 'measure_error':
                 pred_measure = self.measure_predict_model(state, action)
                 bonus = F.mse_loss(pred_measure, measure, reduction='none').mean(dim=1)
@@ -1223,7 +1599,10 @@ class mRegGAIL(object):
                 weight = 1/torch.abs(bonus_m)
                 bonus = weight*bonus_v
                 bonus = bonus.squeeze(1)
-            
+            if self.bonus_type == 'single_step_bonus':
+                bonus = self.calculate_single_step_bonus(measure)
+                self.update_single_step_archive(measure)
+
             reward = gail_reward + bonus 
 
             if self.returns is None:
@@ -1281,6 +1660,35 @@ class mCondRegGAIL(object):
         self.returns = None
         self.ret_rms = RunningMeanStd(shape=())
         self.ob_rms = RunningMeanStd(shape=())
+        self.env_info = {'obs_dim': obs_dim, 'action_dim': action_dim, 'measure_dim': measure_dim}
+        self.single_step_archive = torch.ones([2]*measure_dim).to(self.device)#shape: 2*2*2*2...(measure_dim)
+        
+    def update_single_step_archive(self, single_step_measure):
+        '''
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        '''
+        indices = single_step_measure.t().long() 
+        values = torch.ones(single_step_measure.size(0)).to(self.device)  
+
+        
+        self.single_step_archive.index_put_(tuple(indices), values, accumulate=True)
+    def calculate_single_step_bonus(self, single_step_measure):
+        '''
+        archive_distribution: tensor of shape (2,2,2,2,...,2) 2^measure_dim
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        
+        return: tensor of shape (batch_size,)
+        '''
+        archive_distribution = self.single_step_archive / self.single_step_archive.sum()
+        
+        indices = list(single_step_measure.long().t()) # measure_dim * batch_size
+        
+        prob = archive_distribution[indices] # shape: (batch_size,)
+        
+        bonus = 1/(1 + prob) # is it good?
+        return bonus
 
     def compute_grad_pen(self,
                         expert_state,
@@ -1390,6 +1798,15 @@ class mCondRegGAIL(object):
 
     def calculate_intrinsic_reward(self, state, action, measure, value=None,
                        use_original_reward=True, alpha=1e-8, reward_type='log1-d'):
+        '''
+        for humanoid:
+        state: [3000,227] bs*state_dim
+        action: [3000,17] bs*action_dim
+        measure: [3000,2] bs*n_mdim
+        
+        
+        '''
+        
         with torch.no_grad():
             d = self.discriminator(torch.cat([state, measure, action], dim=1))
             s = torch.sigmoid(d)  
@@ -1399,7 +1816,7 @@ class mCondRegGAIL(object):
                 gail_reward =  torch.log(s + alpha)
             if reward_type == 'log1-d':
                 gail_reward =  - torch.log(1 - s + alpha)
-
+            bonus = 0
             gail_reward = gail_reward.squeeze(1)
             if self.bonus_type == 'measure_error':
                 pred_measure = self.measure_predict_model(state, action)
@@ -1416,7 +1833,10 @@ class mCondRegGAIL(object):
                 weight = 1/torch.abs(bonus_m)
                 bonus = weight*bonus_v
                 bonus = bonus.squeeze(1)
-            
+            if self.bonus_type == 'single_step_bonus':
+                bonus = self.calculate_single_step_bonus(measure)
+                self.update_single_step_archive(measure)
+    
             reward = gail_reward + bonus 
 
             if self.returns is None:
@@ -2485,6 +2905,7 @@ class mCondRegGIRIL(object):
             reward = giril_reward + bonus
         return reward
 
+    
 def parse_args():
     parser = argparse.ArgumentParser()
     # PPO params
@@ -2591,6 +3012,224 @@ def parse_args():
     cfg = AttrDict(vars(args))
     return cfg
 
+
+# measure conditioned VAIL
+class mCondVAIL(object):
+    def __init__(self,
+                 obs_dim,
+                 action_dim,
+                 measure_dim, 
+                 bonus_type='single_step_archive_bonus',
+                 i_c=0.5,
+                 device='cuda:0',
+                 lr=3e-4,
+                 wo_a = False):
+                 
+
+
+        self.device = device
+        self.i_c = i_c
+        self.action_dim = action_dim
+        
+        self.discriminator = VAILdiscriminator(input_dim=obs_dim+measure_dim,  \
+                                     hidden_dim=100, action_dim=self.action_dim).to(device)
+
+
+        self.lr = lr
+        self.intrinsic_reward_rms = RMS(device=self.device)
+
+        self.vail_optim = optim.Adam(
+                                [
+                                    {'params': self.discriminator.parameters()}
+                                ],
+                                lr=self.lr
+                                )
+        
+        self.returns = None
+        self.ret_rms = RunningMeanStd(shape=())
+        self.ob_rms = RunningMeanStd(shape=())
+        self.bonus_type = bonus_type
+        self.env_info = {'obs_dim': obs_dim, 'action_dim': action_dim, 'measure_dim': measure_dim}
+        self.single_step_archive = torch.ones([2]*measure_dim).to(self.device)#shape: 2*2*2*2...(measure_dim)
+
+    def update_single_step_archive(self, single_step_measure):
+        '''
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        '''
+        indices = single_step_measure.t().long()  # Transpose to get the indices in the correct format
+        values = torch.ones(single_step_measure.size(0)).to(self.device)  # Create a tensor of ones with size batch_size
+
+        # Use scatter_add_ to accumulate values in the archive
+        self.single_step_archive.index_put_(tuple(indices), values, accumulate=True)
+    
+    def calculate_single_step_bonus(self, single_step_measure):
+        '''
+        archive_distribution: tensor of shape (2,2,2,2,...,2) 2^measure_dim
+        single_step_measure: tensor of shape (batch_size, measure_dim)
+        e.g. [[1,1,0,0],[0,0,1,0]]
+        
+        return: tensor of shape (batch_size,)
+        '''
+        archive_distribution = self.single_step_archive / self.single_step_archive.sum()
+        
+        indices = list(single_step_measure.long().t()) # measure_dim * batch_size
+        
+        prob = archive_distribution[indices] # shape: (batch_size,)
+        
+        bonus = 1/(1 + prob) # is it good?
+        return bonus
+
+    def _bottleneck_loss(self, mus, sigmas, i_c=0.2, alpha=1e-8):
+        """
+        calculate the bottleneck loss for the given mus and sigmas
+        :param mus: means of the gaussian distributions
+        :param sigmas: stds of the gaussian distributions
+        :param i_c: value of bottleneck
+        :param alpha: small value for numerical stability
+        :return: loss_value: scalar tensor
+        """
+        # add a small value to sigmas to avoid inf log
+        kl_divergence = (0.5 * torch.sum((mus ** 2) + (sigmas ** 2)
+                          - torch.log((sigmas ** 2) + alpha) - 1, dim=1))
+
+        # calculate the bottleneck loss:
+        bottleneck_loss = (torch.mean(kl_divergence) - i_c)
+
+        # return the bottleneck_loss:
+        return bottleneck_loss
+
+    def compute_grad_pen(self,
+                        expert_state,
+                        expert_action,
+                        policy_state,
+                        policy_action,
+                        lambda_=10):
+
+       expert_data = torch.cat([expert_state, expert_action], dim=1)
+       policy_data = torch.cat([policy_state, policy_action], dim=1)
+
+       alpha = torch.rand_like(expert_data).to(expert_data.device)
+
+       mixup_data = alpha * expert_data + (1 - alpha) * policy_data
+       mixup_data.requires_grad = True
+
+       disc, _, _ = self.discriminator(mixup_data)
+       ones = torch.ones(disc.size()).to(disc.device)
+       grad = autograd.grad(
+           outputs=disc,
+           inputs=mixup_data,
+           grad_outputs=ones,
+           create_graph=True,
+           retain_graph=True,
+           only_inputs=True)[0]
+
+       grad_pen = lambda_ * (grad.norm(2, dim=1) - 1).pow(2).mean()
+       return grad_pen
+
+    def feed_forward_generator(self,
+                               b_obs, 
+                               b_actions,
+                               b_measure,
+                               num_minibatches,
+                               minibatch_size=None):
+
+        batch_size = b_obs.shape[1]
+        if minibatch_size is None:
+            minibatch_size = batch_size // num_minibatches
+        sampler = BatchSampler(
+            SubsetRandomSampler(range(batch_size)),
+            minibatch_size,
+            drop_last=True)
+        for indices in sampler:
+            obs_batch = b_obs.view(-1, b_obs.shape[-1])[indices]
+            actions_batch = b_actions.view(-1, b_actions.shape[-1])[indices]
+            measure_batch = b_measure.view(-1, b_measure.shape[-1])[indices] 
+
+            yield obs_batch, actions_batch, measure_batch
+
+
+    def update(self, expert_loader, num_minibatches, b_obs, b_actions, b_measure, obsfilt=None):
+        policy_data_generator = self.feed_forward_generator(b_obs, b_actions, b_measure, \
+                                    num_minibatches, expert_loader.batch_size)
+
+        loss = 0
+        expert_loss_sum = 0.0
+        policy_loss_sum = 0.0
+        n = 0
+        for expert_batch, policy_batch in zip(expert_loader,
+                                              policy_data_generator):
+            policy_state, policy_action, policy_measure = policy_batch[0], policy_batch[1], policy_batch[2]
+            policy_d, policy_mus, policy_sigmas = self.discriminator(
+                torch.cat([policy_state, policy_measure, policy_action], dim=1))
+
+            expert_state, expert_action, expert_measure = expert_batch
+            if obsfilt is not None:
+                expert_state = obsfilt(expert_state.numpy(), update=False)
+            
+            expert_state = torch.FloatTensor(expert_state).to(self.device)
+            expert_action = expert_action.to(self.device)
+            expert_measure = expert_measure.to(self.device)
+            expert_d, expert_mus, expert_sigmas = self.discriminator(
+                torch.cat([expert_state, expert_measure, expert_action], dim=1))
+
+            expert_loss = F.binary_cross_entropy_with_logits(
+                expert_d,
+                torch.ones(expert_d.size()).to(self.device))
+            policy_loss = F.binary_cross_entropy_with_logits( 
+                policy_d,
+                torch.zeros(policy_d.size()).to(self.device))
+
+            # calculate the bottleneck_loss:
+            bottle_neck_loss = self._bottleneck_loss(
+                            torch.cat((expert_mus, policy_mus), dim=0),
+                                        torch.cat((expert_sigmas, policy_sigmas), dim=0), self.i_c)
+
+            vail_loss = expert_loss + policy_loss + bottle_neck_loss
+            grad_pen = self.compute_grad_pen(torch.cat([expert_state, expert_measure], dim=1), 
+                                             expert_action,
+                                             torch.cat([policy_state, policy_measure], dim=1), 
+                                             policy_action)
+
+            loss += (vail_loss + grad_pen).item()
+            expert_loss_sum+=expert_loss.item()
+            policy_loss_sum+=policy_loss.item()
+            n += 1
+
+            self.vail_optim.zero_grad()
+            (vail_loss + grad_pen).backward()
+            # vail_loss.backward()
+            self.vail_optim.step()
+        return loss / n , expert_loss_sum /n, policy_loss_sum/n, expert_sigmas
+
+    def calculate_intrinsic_reward(self, state, action, measure,
+                       use_original_reward=True, alpha=1e-8, reward_type='-log1-d'):
+        with torch.no_grad():
+            d, _, _ = self.discriminator(torch.cat([state, measure, action], dim=1))
+            s = torch.sigmoid(d)  
+            # solution from here: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/issues/204
+            
+            if reward_type == 'logd':
+                gail_reward =  torch.log(s + alpha)
+            if reward_type == '-log1-d':
+                gail_reward =  - torch.log(1 - s + alpha)
+            if reward_type == 'logd-log1-d':
+                gail_reward =  torch.log(s + alpha) - torch.log(1 - s + alpha)
+
+            if self.bonus_type == 'single_step_archive_bonus':
+                bonus = self.calculate_single_step_bonus(measure)
+                self.update_single_step_archive(measure)
+                reward = gail_reward + bonus.unsqueeze(1) 
+            else:
+                reward = gail_reward
+
+            if self.returns is None:
+                self.returns = reward.clone()
+
+            if use_original_reward:
+                return reward 
+            else:
+                return reward / np.sqrt(self.ret_rms.var[0] + alpha)
 if __name__ == '__main__':
 
     args = parse_args()

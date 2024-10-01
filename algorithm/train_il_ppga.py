@@ -24,7 +24,7 @@ from utils.normalize import ReturnNormalizer, ObsNormalizer
 from utils.utilities import save_cfg
 from utils.archive_utils import save_heatmap, load_scheduler_from_checkpoint, archive_df_to_archive
 from envs.brax_custom import reward_offset
-from algorithm.learn_url_reward import ICM, InverseModel, ForwardDynamicsModel, GAIL, VAIL, GIRIL, Encoder
+from algorithm.learn_url_reward import ICM, InverseModel, ForwardDynamicsModel, GAIL, VAIL, GIRIL, Encoder, mRegGAIL
 from algorithm.learn_url_reward import load_sa_data
 import pdb
 
@@ -32,8 +32,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # PPO params
     parser = argparse.ArgumentParser()
+    parser.add_argument('--archive_bonus', default=False,type=lambda x: bool(strtobool(x)))
     parser.add_argument('--env_name', type=str)
+    parser.add_argument('--bonus_smooth', default=True,type=lambda x: bool(strtobool(x)))
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--wo_a', type=lambda x: bool(strtobool(x)), default=False)
     parser.add_argument('--intrinsic_module', type=str, default='gail')
     parser.add_argument('--reward_save_dir', type=str, 
                         default='reward_8_good_and_diverse_elite_with_measures_top500/')
@@ -43,7 +46,7 @@ def parse_args():
                         help='bonus type for m_reg methods',
                         choices=['measure_error', 'measure_error_nll', 'measure_entropy', 
                                  'fitness_cond_measure_entropy', 
-                                 'weighted_fitness_cond_measure_entropy'])
+                                 'weighted_fitness_cond_measure_entropy','single_step_bonus','None'])
     parser.add_argument('--demo_dir', type=str, 
                         default='trajs_good_and_diverse_elite_with_measures_top500/8episodes/')
     parser.add_argument('--num_demo', type=int, default=4)
@@ -226,14 +229,14 @@ def create_scheduler(cfg: AttrDict,
                               learning_rate=archive_learning_rate,
                               threshold_min=threshold_min,
                               seed=cfg.seed,
-                              qd_offset=qd_offset)
+                              qd_offset=qd_offset, cfg = cfg)
 
         if use_result_archive:
             result_archive = GridArchive(solution_dim=solution_dim,
                                          dims=archive_dims,
                                          ranges=bounds,
                                          seed=cfg.seed,
-                                         qd_offset=qd_offset)
+                                         qd_offset=qd_offset,cfg = cfg)
 
     ppo = IntrinsicPPO(cfg)
 
@@ -378,7 +381,7 @@ def train_ppga(cfg: AttrDict, vec_env):
                                                        num_updates=cfg.calc_gradient_iters,
                                                        rollout_length=cfg.rollout_length,
                                                        calculate_dqd_gradients=True,
-                                                       negative_measure_gradients=False)
+                                                       negative_measure_gradients=False,current_archive = scheduler.archive)
 
         # for plotting purposes
         emitter_loc = (measures[0][0], measures[0][1])
@@ -442,7 +445,7 @@ def train_ppga(cfg: AttrDict, vec_env):
                   num_updates=cfg.move_mean_iters,
                   rollout_length=cfg.rollout_length,
                   calculate_dqd_gradients=False,
-                  move_mean_agent=True)
+                  move_mean_agent=True,current_archive = scheduler.archive)
 
         # get the resulting new mean solution point and update the scheduler
         trained_mean_agent = ppo.agents[0]
@@ -472,7 +475,7 @@ def train_ppga(cfg: AttrDict, vec_env):
             df = result_archive.as_pandas(include_solutions=True, include_metadata=True)
             df.to_pickle(os.path.join(final_cp_dir, f"archive_df_{itr:08d}.pkl"))
 
-            if cfg.save_scheduler:
+            if cfg.save_scheduler and cfg.intrinsic_module != 'pwil':
                 scheduler_savepath = os.path.join(final_cp_dir, f'scheduler_{itr:08d}.pkl')
                 save_scheduler(scheduler, scheduler_savepath)
 

@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 from algorithm.learn_url_reward import ICM, mCondICM, mRegICM, mCondRegICM, \
     InverseModel, ForwardDynamicsModel, GIRIL, mCondGIRIL, mRegGIRIL, mCondRegGIRIL, \
-    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL, Encoder, mACGAIL, mCondACGAIL
+    GAIL, VAIL, mCondGAIL, mRegGAIL, mCondRegGAIL, GIRIL, Encoder, mACGAIL, mCondACGAIL, abGAIL, mCondVAIL, PWIL
 from algorithm.learn_url_reward import load_sa_data 
 import pdb
 
@@ -58,7 +58,7 @@ class IntrinsicPPO:
         self.num_envs = cfg.num_envs
         self.obs_shape = cfg.obs_shape
         self.action_shape = cfg.action_shape
-
+        self.archive_bonus = cfg.archive_bonus
         agent = Actor(self.obs_shape, self.action_shape, normalize_obs=cfg.normalize_obs, normalize_returns=cfg.normalize_returns).to(self.device)
         self._agents = [agent]
         critic = QDCritic(self.obs_shape, measure_dim=cfg.num_dims).to(self.device)
@@ -135,7 +135,19 @@ class IntrinsicPPO:
                                             action_dim,
                                             measure_dim=self.cfg.num_dims,
                                             device='cuda:0',
-                                            lr=3e-4)
+                                            lr=3e-4,
+                                            wo_a = self.cfg.wo_a)
+            self.dataset, self.dataloader = load_sa_data(cfg,  
+                                                         return_next_state=False)
+            self.update_reward_model = True
+        if cfg.intrinsic_module == 'm_cond_vail':
+            self.reward_model = mCondVAIL(
+                                            obs_dim,
+                                            action_dim,
+                                            measure_dim=self.cfg.num_dims,
+                                            device='cuda:0',
+                                            lr=3e-4,
+                                            wo_a = self.cfg.wo_a)
             self.dataset, self.dataloader = load_sa_data(cfg,  
                                                          return_next_state=False)
             self.update_reward_model = True
@@ -162,6 +174,19 @@ class IntrinsicPPO:
                                             bonus_type=self.cfg.bonus_type,
                                             device='cuda:0',
                                             lr=3e-4)
+            self.dataset, self.dataloader = load_sa_data(cfg,  
+                                                         return_next_state=False)
+            self.update_reward_model = True
+        if cfg.intrinsic_module == 'abgail':
+            self.reward_model = abGAIL(
+                                            obs_dim,
+                                            action_dim,
+                                            measure_dim=self.cfg.num_dims,
+                                            
+                                            bonus_type=self.cfg.bonus_type,
+                                            device='cuda:0',
+                                            lr=3e-4,
+                                            wo_a = self.cfg.wo_a)
             self.dataset, self.dataloader = load_sa_data(cfg,  
                                                          return_next_state=False)
             self.update_reward_model = True
@@ -293,7 +318,20 @@ class IntrinsicPPO:
                                         )
             print('Loading pretrained intrinsic module: %s' % reward_model_file_name)
             self.reward_model.encoder, self.reward_model.forward_dynamics_model = torch.load(reward_model_file_name)
-
+        if cfg.intrinsic_module == 'pwil':
+            self.dataset, self.dataloader = load_sa_data(cfg,  
+                                                         return_next_state=False)
+            self.reward_model = PWIL(
+                                            obs_dim,
+                                            action_dim,
+                                            self.dataloader,
+                                            reward_scale=1.0,
+                                            reward_bandwidth_scale=1.0,
+                                            time_horizon=1000,
+                                            device='cuda:0',
+                                            )
+            self.update_reward_model = False
+        
         if cfg.intrinsic_module == 'zero':
             self.reward_model = None
 
@@ -478,9 +516,24 @@ class IntrinsicPPO:
                     break
 
         return pg_loss, v_loss, entropy_loss, old_approx_kl, approx_kl, clipfracs, ratio
-
+    def bonus(self, current_archive):
+        '''
+        modify self.rewards with archive bonus based on measures
+        please refer to _grid_archive.py for more details about archive operation.
+        self.rewards: [rollout_length, num_envs] [128,3000]
+        self.measures: [rollout_length, num_envs, num_dims] [128,3000,2], and {0,1}
+        '''
+        bonus = current_archive.cal_bonus(self.measures)
+        self.rewards = self.rewards + torch.tensor(bonus).to(self.device)
+        pass
+        
+        
+        
+        
+        
+        
     def train(self, vec_env, num_updates, rollout_length, calculate_dqd_gradients=False, move_mean_agent=False,
-              negative_measure_gradients=False):
+              negative_measure_gradients=False,current_archive = None):
         global_step = 0
         # self.next_obs = vec_env.reset()
         next_obs = vec_env.reset()
@@ -568,7 +621,7 @@ class IntrinsicPPO:
                             intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                 self.obs[step], action).squeeze()
                         elif self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_reg_gail', 
-                                                       'm_acgail', 'm_cond_acgail']:
+                                                       'm_acgail', 'm_cond_acgail','abgail','m_cond_vail']:
                             if 'fitness_cond' in self.cfg.bonus_type:
                                 intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                     self.obs[step], action, self.measures[step], self.values[step]).squeeze()
@@ -592,13 +645,15 @@ class IntrinsicPPO:
                         else:
                             intrinsic_reward = self.reward_model.calculate_intrinsic_reward(
                                                 self.obs[step], action, self.next_obs)
-                    
+                 
                     self.rewards[step] = torch.nan_to_num(intrinsic_reward, nan=0.0, posinf=10.0, neginf=-10.0) 
                     
 
 
                     if not calculate_dqd_gradients and not move_mean_agent:
                         if dones.any():
+                            if self.cfg.intrinsic_module == 'pwil':
+                                self.reward_model.reset()
                             dones_bool = dones.bool()
                             dones_cpu = dones_bool.cpu()
                             self.episodic_returns.extend(self.total_rewards[dones_cpu].tolist())
@@ -606,6 +661,11 @@ class IntrinsicPPO:
                             self.total_rewards[dones_bool] = 0
                             self.ep_len[dones_bool] = 0
                         self.num_intervals += 1
+                if self.archive_bonus == True:
+                    
+                    self.bonus(current_archive)
+                    
+
 
                 if calculate_dqd_gradients:
                     envs_per_dim = self.cfg.num_envs // (self.cfg.num_dims + 1)
@@ -646,12 +706,12 @@ class IntrinsicPPO:
             # update reward model 
             if self.update_reward_model:
                 
-                if self.intrinsic_module == 'gail' or self.intrinsic_module == 'vail':
+                if self.intrinsic_module in ['gail','vail','abgail']:
                     reward_loss = self.reward_model.update(self.dataloader, self.cfg.num_minibatches, 
                                                            b_obs.detach(), b_actions.detach())        
 
                 if self.intrinsic_module in ['m_cond_gail', 'm_reg_gail', 'm_cond_reg_gail',
-                                             'm_acgail', 'm_cond_acgail']:
+                                             'm_acgail', 'm_cond_acgail','m_cond_vail']:
                     b_measures = self.measures.transpose(0, 1).reshape(num_agents, -1, self.cfg.num_dims)
                     reward_loss = self.reward_model.update(self.dataloader, self.cfg.num_minibatches, 
                                                            b_obs.detach(), b_actions.detach(), b_measures.detach())        
@@ -809,10 +869,22 @@ class IntrinsicPPO:
         # the first done in each env is where that trajectory ends
         traj_lengths = torch.argmax(all_dones, dim=0) + 1
         # TODO: figure out how to vectorize this
-        for i in range(vec_env.num_envs):
-            measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
-        measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1).detach().cpu().numpy()
+        # Create a mask that zeros out the measures beyond the trajectory length
+        #-------------------vectorized version
+        mask = torch.arange(num_steps, device=self.device).unsqueeze(1) < traj_lengths.unsqueeze(0)
 
+        masked_measures_acc = measures_acc * mask.unsqueeze(-1) 
+        summed_measures = masked_measures_acc.sum(dim=0)  
+
+   
+        measures = summed_measures / traj_lengths.unsqueeze(-1)  
+
+        measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1).detach().cpu().numpy()
+        # -----------------without vectorize
+        """ for i in range(vec_env.num_envs):
+                measures[i] = measures_acc[:traj_lengths[i], i].sum(dim=0) / traj_lengths[i]
+            measures = measures.reshape(vec_agent.num_models, vec_env.num_envs // vec_agent.num_models, -1).mean(dim=1).detach().cpu().numpy() """
+        #---------------------------
         total_reward = total_reward.reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).mean(
             axis=1)
         avg_traj_lengths = traj_lengths.to(torch.float32).reshape((vec_agent.num_models, vec_env.num_envs // vec_agent.num_models)).\
